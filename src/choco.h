@@ -98,13 +98,6 @@ private:
 };
 
 
-class MemTabletScan {
-public:
-    MemTabletScan() = default;
-private:
-
-};
-
 
 class HashIndex {
 
@@ -159,14 +152,40 @@ private:
 };
 
 
+class ColumnScan {
+public:
+    ColumnScan() = default;
+private:
+    string _name;
+    bool _proj;
+
+};
+
+class ScanInfo {
+public:
+    ScanInfo() = default;
+private:
+    uint64_t _version;
+    vector<ColumnScan> _columns;
+};
+
+class MemTabletScan;
+
 class MemTablet {
 public:
     MemTablet() = default;
+    unique_ptr<MemTabletScan> scan(uint64_t )
 private:
     vector<unique_ptr<MemSubTablet>> _sub_tablets;
 };
 
 
+class MemTabletScan {
+public:
+    MemTabletScan() = default;
+private:
+
+};
 
 
 
