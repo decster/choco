@@ -1,15 +1,6 @@
-#include <errno.h>
-#include "choco.h"
+#include "type.h"
 
-inline void* aligned_malloc(size_t size, size_t align) {
-  void* ptr = nullptr;
-  int rc = posix_memalign(&ptr, align, size);
-  return rc == 0 ? (errno = 0, ptr) : (errno = rc, nullptr);
-}
-
-inline void aligned_free(void* aligned_ptr) {
-  free(aligned_ptr);
-}
+namespace choco {
 
 
 TypeInfo::TypeInfo(Type type, const char* name, size_t size, PrintDebugFunc print_func) :
@@ -88,7 +79,8 @@ const TypeInfo& TypeInfo::get(Type type) {
     if (type >= Type::Nothing && type <= Type::String) {
         return gInfos[type];
     }
-    FATAL_EXIT
+    LOG(FATAL) << "illegal type";
+    return gInfos[Type::Nothing];
 }
 
 
@@ -126,7 +118,8 @@ void Variant::reset(Type type, const void* value) {
     _type = type;
     switch(type) {
     case Type::Nothing:
-        FATAL_EXIT
+        LOG(FATAL) << "illegal nothing type";
+        break;
     case Type::Int8:
         _value.i8 = *(int8_t*)value;
         break;
@@ -159,10 +152,9 @@ void Variant::reset(Type type, const void* value) {
         }
         break;
     default:
-        FATAL_EXIT
+        LOG(FATAL) << Format("illegal type %d", (int)type);
     }
 }
-
 
 bool Variant::operator==(const Variant& rhs) const {
     if (_type != rhs._type) {
@@ -170,7 +162,7 @@ bool Variant::operator==(const Variant& rhs) const {
     }
     switch (_type) {
     case Type::Nothing:
-        FATAL_EXIT
+        return true;
     case Type::Int8:
         return _value.i8 == rhs._value.i8;
     case Type::Int16:
@@ -188,46 +180,10 @@ bool Variant::operator==(const Variant& rhs) const {
     case Type::String:
         return *(Slice*)&_value == *(Slice*)&rhs._value;
     default:
-        FATAL_EXIT
+        LOG(FATAL) << "illegal nothing type";
+        return false;
     }
 }
 
 
-
-Schema::Schema(vector<ColumnSchema>& columns, uint32_t num_key_column) {
-    if (num_key_column > columns.size()) {
-        FATAL_EXIT
-    }
-    uint32_t max_cid = 0;
-    columns.swap(_columns);
-    _num_key_column = num_key_column;
-    for (auto& c : _columns) {
-        _name_to_col[c.name] = &c;
-        _cid_to_col[c.cid] = &c;
-        max_cid = std::max(c.cid, max_cid);
-    }
-    _next_cid = max_cid+1;
-}
-
-uint32_t Schema::next_cid() const {
-    return _next_cid;
-}
-
-const ColumnSchema* Schema::get(const string& name) const {
-    auto itr = _name_to_col.find(name);
-    if (itr == _name_to_col.end()) {
-        return nullptr;
-    } else {
-        return itr->second;
-    }
-}
-
-const ColumnSchema* Schema::get(uint32_t cid) const {
-    auto itr = _cid_to_col.find(cid);
-    if (itr == _cid_to_col.end()) {
-        return nullptr;
-    } else {
-        return itr->second;
-    }
-}
-
+} /* namespace choco */

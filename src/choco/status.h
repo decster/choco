@@ -1,5 +1,5 @@
-#ifndef SRC_STATUS_H_
-#define SRC_STATUS_H_
+#ifndef CHOCO_STATUS_H_
+#define CHOCO_STATUS_H_
 
 #include <errno.h>
 #include <stdint.h>

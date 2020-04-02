@@ -1,5 +1,5 @@
-#ifndef SRC_SLICE_H_
-#define SRC_SLICE_H_
+#ifndef CHOCO_SLICE_H_
+#define CHOCO_SLICE_H_
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -189,4 +189,4 @@ inline bool operator!=(const Slice& x, const Slice& y) {
   return !(x == y);
 }
 
-#endif /* SRC_SLICE_H_ */
+#endif /* CHOCO_SLICE_H_ */

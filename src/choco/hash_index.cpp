@@ -1,8 +1,8 @@
 #include <emmintrin.h>
 #include <stdio.h>
 #include <algorithm>
-#include "utils.h"
 #include "hash_index.h"
+#include "common.h"
 
 namespace choco {
 
@@ -132,8 +132,8 @@ void HashIndex::dump() {
         }
     }
     Log("chunk: %zu %.1fM capacity: %zu/%zu slot util: %.3f",
-            _num_chunks, _num_chunks*64.0f/(1024*1024), size(), max_size(),
-            size() / (_num_chunks*12.0f));
+        _num_chunks, _num_chunks*64.0f/(1024*1024), size(), max_size(),
+        size() / (_num_chunks*12.0f));
     if (kHashIndexStats) {
         Log("find: %zu entry: %zu(%.3f) probe: %zu(%.3f)", _nfind, _nentry, (float)_nentry/_nfind, _nprobe, (float)_nprobe/_nfind);
     }

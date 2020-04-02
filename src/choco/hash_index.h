@@ -1,24 +1,12 @@
-#ifndef HASH_INDEX_H_
-#define HASH_INDEX_H_
+#ifndef CHOCO_HASH_INDEX_H_
+#define CHOCO_HASH_INDEX_H_
 
 #include <stdint.h>
 #include <vector>
-#include "utils.h"
+
+#include "common.h"
 
 namespace choco {
-
-inline uint64_t Hash64(uint64_t key) {
-    // twang_mix64
-    key = (~key) + (key << 21); // key *= (1 << 21) - 1; key -= 1;
-    key = key ^ (key >> 24);
-    key = key + (key << 3) + (key << 8); // key *= 1 + (1 << 3) + (1 << 8)
-    key = key ^ (key >> 14);
-    key = key + (key << 2) + (key << 4); // key *= 1 + (1 << 2) + (1 << 4)
-    key = key ^ (key >> 28);
-    key = key + (key << 31); // key *= 1 + (1 << 31)
-    return key;
-}
-
 
 struct HashChunk;
 
@@ -69,4 +57,4 @@ private:
 
 }
 
-#endif /* HASH_INDEX_H_ */
+#endif /* CHOCO_HASH_INDEX_H_ */

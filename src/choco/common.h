@@ -1,23 +1,30 @@
-#ifndef CHOCO_UTILS_H_
-#define CHOCO_UTILS_H_
+#ifndef CHOCO_COMMON_H_
+#define CHOCO_COMMON_H_
 
-#include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <memory.h>
+#include <string.h>
 #include <string>
 #include <vector>
-#include <deque>
 #include <unordered_map>
+#include <algorithm>
 #include <memory>
+#include <mutex>
+#include <atomic>
+#include "common/logging.h"
+#include "status.h"
+#include "slice.h"
+#include "hashcode.h"
 
 using std::vector;
-using std::deque;
 using std::string;
 using std::unique_ptr;
 using std::shared_ptr;
 using std::unordered_map;
+using std::mutex;
 
 namespace choco {
 
@@ -186,10 +193,93 @@ private:
 };
 
 
-void Log(const char * fmt, ...);
+
+class RefCounted {
+public:
+    RefCounted() : _ref_count(1) {}
+
+    size_t addRef() {
+        return ++_ref_count;
+    }
+    size_t decRef() {
+        return --_ref_count;
+    }
+    void * refPos() {return &_ref_count;}
+private:
+    std::atomic<size_t> _ref_count;
+};
+
+
+template <class T>
+class RefPtr {
+public:
+    RefPtr(T* obj=nullptr) : _obj(obj) {};
+
+    RefPtr(const RefPtr& rhs) : _obj(rhs._obj) {
+        addRef();
+    }
+
+    RefPtr(RefPtr&& rhs) : _obj(rhs._obj) {
+        rhs._obj = nullptr;
+    }
+
+    ~RefPtr() {
+        decRef();
+    }
+
+    void swap(RefPtr& rhs) {
+        std::swap(_obj, rhs._obj);
+    }
+
+    RefPtr& operator=(const RefPtr& rhs) {
+        RefPtr tmp = rhs;
+        tmp.swap(tmp);
+        return *this;
+    }
+
+    T* get() const {
+        return _obj;
+    }
+
+    T& operator*() const {
+        return *_obj;
+    }
+
+    operator bool() const {
+        return _obj != nullptr;
+    }
+
+    void reset() {
+        decRef();
+    }
+
+private:
+    void addRef() {
+        if (_obj) {
+            _obj->addRef();
+        }
+    }
+
+    void decRef() {
+        if (_obj) {
+            if (_obj->decRef() == 0) {
+                delete _obj;
+            }
+            _obj = nullptr;
+        }
+    }
+
+    T* _obj;
+};
+
+
 string Format(const char * fmt, ...);
+
+#define Logs(str) LOG(INFO) << str
+#define Log(fmt, ...) LOG(INFO) << Format(fmt, __VA_ARGS__)
+
 double Time();
 
 }
 
-#endif /* CHOCO_UTILS_H_ */
+#endif /* CHOCO_COMMON_H_ */
