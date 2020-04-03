@@ -1,3 +1,4 @@
+#include "common.h"
 #include "type.h"
 
 namespace choco {
@@ -133,7 +134,7 @@ void Variant::reset(Type type, const void* value) {
         _value.i64 = *(int64_t*)value;
         break;
     case Type::Int128:
-        _value.i128 = *(__int128*)value;
+        _value.i128 = *(int128_t*)value;
         break;
     case Type::Float32:
         _value.f32 = *(float*)value;

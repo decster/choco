@@ -204,7 +204,7 @@ public:
     size_t decRef() {
         return --_ref_count;
     }
-    void * refPos() {return &_ref_count;}
+
 private:
     std::atomic<size_t> _ref_count;
 };
@@ -213,7 +213,9 @@ private:
 template <class T>
 class RefPtr {
 public:
-    RefPtr(T* obj=nullptr) : _obj(obj) {};
+    RefPtr() : _obj(nullptr) {}
+
+    explicit RefPtr(T* obj, bool addref=true) : _obj(obj) {if(addref) addRef();}
 
     RefPtr(const RefPtr& rhs) : _obj(rhs._obj) {
         addRef();
@@ -243,6 +245,10 @@ public:
 
     T& operator*() const {
         return *_obj;
+    }
+
+    T* operator->() const {
+        return _obj;
     }
 
     operator bool() const {

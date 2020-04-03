@@ -1,11 +1,14 @@
 #ifndef CHOCO_HASH_H_
 #define CHOCO_HASH_H_
 
+#include "type.h"
 #include "slice.h"
 
 namespace choco {
 
-inline uint64_t HashCode(uint64_t key) {
+template<class T>
+uint64_t HashCode(const T value) {
+    uint64_t key = static_cast<uint64_t>(value);
     // twang_mix64
     key = (~key) + (key << 21); // key *= (1 << 21) - 1; key -= 1;
     key = key ^ (key >> 24);
@@ -17,7 +20,7 @@ inline uint64_t HashCode(uint64_t key) {
     return key;
 }
 
-inline uint64_t HashCode(__int128 key) {
+inline uint64_t HashCode(int128_t key) {
     // TODO:
     return 0;
 }

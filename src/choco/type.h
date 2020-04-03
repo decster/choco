@@ -1,9 +1,15 @@
 #ifndef CHOCO_TYPE_H_
 #define CHOCO_TYPE_H_
 
-#include "common.h"
+#include <stdint.h>
+#include <string>
+#include "slice.h"
+
+using std::string;
 
 namespace choco {
+
+typedef __int128 int128_t;
 
 enum Type {
     Nothing = 0,
@@ -16,6 +22,58 @@ enum Type {
     Float64 = 7,
     String = 8
 };
+
+template <Type t> struct TypeTrait {};
+
+template <> struct TypeTrait<Int8> {
+    typedef int8_t cpp_type;
+    static const char *name() {
+        return "int8";
+    }
+};
+template <> struct TypeTrait<Int16> {
+    typedef int16_t cpp_type;
+    static const char *name() {
+        return "int16";
+    }
+};
+template <> struct TypeTrait<Int32> {
+    typedef int32_t cpp_type;
+    static const char *name() {
+        return "int32";
+    }
+};
+template <> struct TypeTrait<Int64> {
+    typedef int64_t cpp_type;
+    static const char *name() {
+        return "int64";
+    }
+};
+template <> struct TypeTrait<Int128> {
+    typedef int128_t cpp_type;
+    static const char *name() {
+        return "int128";
+    }
+};
+template <> struct TypeTrait<Float32> {
+    typedef float cpp_type;
+    static const char *name() {
+        return "float32";
+    }
+};
+template <> struct TypeTrait<Float64> {
+    typedef double cpp_type;
+    static const char *name() {
+        return "float64";
+    }
+};
+template <> struct TypeTrait<String> {
+    typedef Slice cpp_type;
+    static const char *name() {
+        return "string";
+    }
+};
+
 
 class TypeInfo {
 public:
@@ -61,11 +119,11 @@ private:
     void clear();
 
     union alignas(16) Value {
-        __int128 i128;
         int8_t i8;
         int16_t i16;
         int32_t i32;
         int64_t i64;
+        int128_t i128;
         float f32;
         double f64;
     };

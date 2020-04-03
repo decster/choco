@@ -13,6 +13,7 @@ public:
     bool init(uint64_t size, uint32_t tag=0);
     void clear();
 
+    operator bool() {return _data != nullptr;}
     uint8_t* data() {return _data;}
     uint64_t bsize() {return _bsize;}
 

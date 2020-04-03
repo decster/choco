@@ -1,5 +1,6 @@
 
 add_library(choco STATIC
+  status.cpp
   buffer.cpp
   column_delta.cpp
   column.cpp

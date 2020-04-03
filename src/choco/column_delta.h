@@ -10,6 +10,9 @@ namespace choco {
 class DeltaIndex : public RefCounted {
 public:
     DeltaIndex() = default;
+
+    uint32_t find_idx(uint32_t rid);
+
 private:
     vector<uint32_t> _block_starts;
     Buffer _data;
@@ -24,6 +27,11 @@ private:
 class ColumnDelta : public RefCounted {
 public:
     ColumnDelta() = default;
+
+    Buffer& nulls() { return _nulls; }
+    Buffer& data() { return _data; }
+    DeltaIndex* index() { return _index.get(); }
+
 private:
     RefPtr<DeltaIndex> _index;
     Buffer _nulls;
