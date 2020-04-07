@@ -2,7 +2,7 @@
 
 namespace choco {
 
-bool Buffer::init(uint64_t size, uint32_t tag) {
+bool Buffer::init(size_t size, BufferTag tag) {
     if (size > 0) {
         uint8_t* data = (uint8_t*)aligned_malloc(size, 64);
         if (!data) {
@@ -22,6 +22,13 @@ void Buffer::clear() {
         _bsize = 0;
     }
 }
+
+void Buffer::set_zero() {
+    if (_data) {
+        memset(_data, 0, _bsize);
+    }
+}
+
 
 Buffer::~Buffer() {
     clear();

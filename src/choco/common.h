@@ -259,6 +259,10 @@ public:
         decRef();
     }
 
+    static RefPtr<T> create() {
+        return RefPtr<T>(new T());
+    }
+
 private:
     void addRef() {
         if (_obj) {

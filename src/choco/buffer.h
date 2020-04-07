@@ -5,23 +5,40 @@
 
 namespace choco {
 
+struct BufferTag {
+    BufferTag(uint64_t tag) : tag(tag) {}
+
+    static BufferTag base(uint32_t cid, uint32_t bid) { return  BufferTag((uint64_t)cid) << 32 | ((uint64_t)bid << 16); };
+
+    static BufferTag delta(uint32_t cid) { return BufferTag((uint64_t)cid) << 32 | ((uint64_t)0xffff << 16); }
+
+    BufferTag null() { return BufferTag(tag | 1); }
+    BufferTag data() { return BufferTag(tag | 2); }
+    BufferTag index() { return BufferTag(tag | 4); }
+
+    uint64_t tag;
+};
+
+
 class Buffer {
 public:
     Buffer();
     ~Buffer();
 
-    bool init(uint64_t size, uint32_t tag=0);
+    bool init(size_t size, BufferTag tag=0);
     void clear();
 
-    operator bool() {return _data != nullptr;}
+    void set_zero();
+
+    operator bool() const {return _data != nullptr;}
     uint8_t* data() {return _data;}
-    uint64_t bsize() {return _bsize;}
+    size_t bsize() const {return _bsize;}
 
     template <class T> T* as() { return (T*)_data; }
 
 private:
 
-    uint64_t _bsize = 0;
+    size_t _bsize = 0;
     uint8_t* _data = nullptr;
 };
 

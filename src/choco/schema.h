@@ -20,6 +20,10 @@ struct ColumnSchema {
         nullable = rhs.nullable;
         default_value.reset(new Variant(*rhs.default_value));
     }
+
+    void * default_value_ptr() const {
+        return default_value ? default_value->value() : nullptr;
+    }
 };
 
 
