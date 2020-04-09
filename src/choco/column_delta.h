@@ -12,18 +12,13 @@ class ColumnDelta;
 
 class DeltaIndex : public RefCounted {
 public:
+    static const uint32_t npos = 0xffffffffu;
+
     DeltaIndex() = default;
 
     uint32_t find_idx(uint32_t rid);
 
     Buffer& index() { return _data; }
-
-    void append_rid(uint32_t cidx, uint32_t rid);
-
-    void finalize(uint32_t cidx);
-
-private:
-    friend class ColumnDelta;
 
     vector<uint32_t> _block_ends;
     Buffer _data;
@@ -47,9 +42,9 @@ public:
 
     uint32_t find_idx(uint32_t rid) { return _index->find_idx(rid); }
 
-    Status init(size_t nblock, size_t size, size_t esize, BufferTag tag, bool has_null);
+    Status alloc(size_t nblock, size_t size, size_t esize, BufferTag tag, bool has_null);
 
-    Status create_for_undo(RefPtr<ColumnDelta>& ret);
+    Status create_for_compaction(RefPtr<ColumnDelta>& ret);
 
 private:
     size_t _size = 0;

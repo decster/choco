@@ -15,7 +15,7 @@ public:
 
     Buffer& nulls() { return _nulls; }
 
-    Status init(size_t size, size_t esize, BufferTag tag);
+    Status alloc(size_t size, size_t esize, BufferTag tag);
 
     bool is_null(uint32_t idx) {
         return _nulls && _nulls.as<bool>()[idx];
@@ -36,12 +36,12 @@ private:
 
 class ColumnReader;
 class ColumnWriter;
-
+template<class, bool, class, class> class TypedColumnWriter;
 
 class Column : public RefCounted {
 public:
-    const uint32_t BLOCK_SIZE = 1<<16;
-    const uint32_t BLOCK_MASK = 0xffff;
+    static const uint32_t BLOCK_SIZE = 1<<16;
+    static const uint32_t BLOCK_MASK = 0xffff;
 
     Column(const ColumnSchema& cs, uint64_t version);
 
@@ -60,6 +60,7 @@ public:
 private:
     friend class ColumnReader;
     friend class ColumnWriter;
+    template<class, bool, class, class> friend class TypedColumnWriter;
 
     void prepare_writer();
 
@@ -114,8 +115,8 @@ class ColumnWriter {
 public:
     virtual ~ColumnWriter() {}
     virtual Status reserve(size_t size);
-    virtual Status insert(uint32_t rid, void * value);
-    virtual Status update(uint32_t rid, void * value);
+    virtual Status insert(uint32_t rid, const void * value);
+    virtual Status update(uint32_t rid, const void * value);
     virtual Status finalize();
 
 protected:

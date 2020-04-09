@@ -2,17 +2,16 @@
 
 namespace choco {
 
-bool Buffer::init(size_t size, BufferTag tag) {
+Status Buffer::alloc(size_t size, BufferTag tag) {
     if (size > 0) {
-        uint8_t* data = (uint8_t*)aligned_malloc(size, 64);
+        uint8_t* data = (uint8_t*)aligned_malloc(size, size>=4096?4096:64);
         if (!data) {
-            LOG(FATAL) << Format("create buffer size=%zu tag=%u failed, out of memory", size, tag);
-            return false;
+            return Status::OOM(Format("alloc buffer size=%zu tag=%016lx failed", size, tag.tag));
         }
         _data = data;
         _bsize = size;
     }
-    return true;
+    return Status::OK();
 }
 
 void Buffer::clear() {

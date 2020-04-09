@@ -4,13 +4,13 @@
 
 namespace choco {
 
-Status ColumnPage::init(size_t size, size_t esize, BufferTag tag) {
+Status ColumnPage::alloc(size_t size, size_t esize, BufferTag tag) {
     if (_data || _nulls) {
         LOG(FATAL) << "reinit column page";
     }
-    bool ok = _data.init(size * esize, tag.data());
-    if (!ok) {
-        return Status::OOM("init column page");
+    Status ret = _data.alloc(size * esize, tag.data());
+    if (!ret) {
+        return ret;
     }
     _data.set_zero();
     _tag = tag;
@@ -20,9 +20,9 @@ Status ColumnPage::init(size_t size, size_t esize, BufferTag tag) {
 
 Status ColumnPage::set_null(uint32_t idx) {
     if (!_nulls) {
-        bool ok = _nulls.init(_size, _tag.null());
-        if (!ok) {
-            return Status::OOM("init column page nulls");
+        Status ret = _nulls.alloc(_size, _tag.null());
+        if (!ret) {
+            return ret;
         }
         _nulls.set_zero();
     }
@@ -142,13 +142,26 @@ public:
 ColumnWriter::ColumnWriter(Column* column) : _column(column), _base(column->_base) {}
 
 template <class T>
-struct NullableUpdateType {
-    bool isnull;
-    T value = 0;
+class NullableUpdateType {
+public:
+    bool& isnull() { return _isnull;}
+    T& value() { return _value; }
+private:
+    bool _isnull;
+    T _value = 0;
+};
+
+template <class T>
+class UpdateType {
+public:
+    bool& isnull() { return *(bool*)nullptr; /*unused*/ }
+    T& value() { return _value; }
+private:
+    T _value = 0;
 };
 
 
-template <class T, class ST=T, class UT=ST, bool Nullable=false>
+template <class T, bool Nullable=false, class UT=UpdateType<T>, class ST=T>
 class TypedColumnWriter : public ColumnWriter {
 public:
     TypedColumnWriter(Column* column) : ColumnWriter(column), _update_has_null(false) {}
@@ -165,7 +178,7 @@ public:
         vector<RefPtr<ColumnPage>> rcs(required);
         for (size_t i=0;i<rcs.size();i++) {
             rcs[i] = RefPtr<ColumnPage>::create();
-            Status ret = rcs[i]->init(sizeof(ST)*Column::BLOCK_SIZE, 0, BufferTag::base(_column->schema().cid, (uint32_t)(old_size+i)));
+            Status ret = rcs[i]->alloc(sizeof(ST)*Column::BLOCK_SIZE, 0, BufferTag::base(_column->schema().cid, (uint32_t)(old_size+i)));
             if (!ret) {
                 return ret;
             }
@@ -181,7 +194,7 @@ public:
         return Status::OK();
     }
 
-    virtual Status insert(uint32_t rid, void * value) {
+    virtual Status insert(uint32_t rid, const void * value) {
         DCHECK_LT(rid, _column->_capacity);
         uint32_t bid = rid >> 16;
         DCHECK(bid < _base.size());
@@ -190,7 +203,7 @@ public:
         if (Nullable) {
             if (value) {
                 if (std::is_same<T, ST>::value) {
-                    _base[bid]->data().as<ST>()[idx] = *value;
+                    _base[bid]->data().as<ST>()[idx] = *static_cast<const ST*>(value);
                 } else {
                     // TODO: string support
                 }
@@ -203,7 +216,7 @@ public:
             }
             DCHECK_NOTNULL(value);
             if (std::is_same<T, ST>::value) {
-                _base[bid]->data().as<ST>()[idx] = *static_cast<ST*>(value);
+                _base[bid]->data().as<ST>()[idx] = *static_cast<const ST*>(value);
             } else {
                 // TODO: string support
             }
@@ -211,22 +224,22 @@ public:
         return Status::OK();
     }
 
-    virtual Status update(uint32_t rid, void * value) {
+    virtual Status update(uint32_t rid, const void * value) {
         DCHECK_LT(rid, _column->_capacity);
         if (Nullable) {
             auto& uv = _updates[rid];
             if (value) {
-                uv.isnull = false;
+                uv.isnull() = false;
                 if (std::is_same<T, ST>::value) {
-                    uv.value = *(T*)value;
+                    uv.value() = *(T*)value;
                 } else {
                     // TODO: string support
                 }
             } else {
                 _update_has_null = true;
-                uv.isnull = true;
+                uv.isnull() = true;
                 if (std::is_same<T, ST>::value) {
-                    uv.value = (T)0;
+                    uv.value() = (T)0;
                 } else {
                     // TODO: string support
                 }
@@ -238,7 +251,7 @@ public:
             }
             DCHECK_NOTNULL(value);
             if (std::is_same<T, ST>::value) {
-                uv.value = *(T*)value;
+                uv.value() = *static_cast<const ST*>(value);
             } else {
                 // TODO: string support
             }
@@ -248,9 +261,10 @@ public:
 
     virtual Status finalize() {
         // prepare delta
+        size_t nblock = _base.size();
         RefPtr<ColumnDelta> delta = RefPtr<ColumnDelta>::create();
-        Status ret = delta->init(
-                _base.size(),
+        Status ret = delta->alloc(
+                nblock,
                 _updates.size(),
                 sizeof(ST),
                 BufferTag::delta(_column->schema().cid), _update_has_null);
@@ -258,22 +272,32 @@ public:
             return ret;
         }
         DeltaIndex* index = delta->index();
+        vector<uint32_t>& block_ends = index->_block_ends;
+        Buffer& idxdata = index->_data;
         Buffer& data = delta->data();
         Buffer& nulls = delta->nulls();
         uint32_t cidx = 0;
+        uint32_t curbid = 0;
         for (auto& e : _updates) {
-            index->append_rid(cidx, e.first);
+            uint32_t rid = e.first;
+            uint32_t bid = rid >> 16;
+            while (curbid < bid) {
+                block_ends[curbid] = cidx;
+                curbid++;
+            }
+            idxdata.as<uint16_t>()[cidx] = rid & 0xffff;
             if (Nullable) {
-                bool isnull = nulls.as<bool>[cidx] = e.second.isnull;
-                if (!isnull) {
-                    data.as<ST>[cidx] = e.second.value;
+                bool isnull = e.second.isnull();
+                if (isnull) {
+                    nulls.as<bool>()[cidx] = true;
+                } else {
+                    data.as<ST>()[cidx] = e.second.value();
                 }
             } else {
-                data.as<ST>[cidx] = e.second;
+                data.as<ST>()[cidx] = e.second.value();
             }
             cidx++;
         }
-        index->finalize(cidx);
         _updates.clear();
         _delta.swap(delta);
         return Status::OK();
@@ -370,9 +394,63 @@ Status Column::read_at(uint64_t version, unique_ptr<ColumnReader>& cr) {
 void Column::prepare_writer() {
     Type type = schema().type;
     bool nullable = schema().nullable;
+    unique_ptr<ColumnWriter> cw;
     switch (type) {
     case Int8:
+        if (nullable) {
+            cw.reset(new TypedColumnWriter<int8_t, true, NullableUpdateType<int8_t>>(this));
+        } else {
+            cw.reset(new TypedColumnWriter<int8_t>(this));
+        }
         break;
+    case Int16:
+        if (nullable) {
+            cw.reset(new TypedColumnWriter<int16_t, true, NullableUpdateType<int16_t>>(this));
+        } else {
+            cw.reset(new TypedColumnWriter<int16_t>(this));
+        }
+        break;
+    case Int32:
+        if (nullable) {
+            cw.reset(new TypedColumnWriter<int32_t, true, NullableUpdateType<int32_t>>(this));
+        } else {
+            cw.reset(new TypedColumnWriter<int32_t>(this));
+        }
+        break;
+    case Int64:
+        if (nullable) {
+            cw.reset(new TypedColumnWriter<int64_t, true, NullableUpdateType<int64_t>>(this));
+        } else {
+            cw.reset(new TypedColumnWriter<int64_t>(this));
+        }
+        break;
+    case Int128:
+        if (nullable) {
+            cw.reset(new TypedColumnWriter<int128_t, true, NullableUpdateType<int128_t>>(this));
+        } else {
+            cw.reset(new TypedColumnWriter<int128_t>(this));
+        }
+        break;
+    case Float32:
+        if (nullable) {
+            cw.reset(new TypedColumnWriter<float, true, NullableUpdateType<float>>(this));
+        } else {
+            cw.reset(new TypedColumnWriter<float>(this));
+        }
+        break;
+    case Float64:
+        if (nullable) {
+            cw.reset(new TypedColumnWriter<double, true, NullableUpdateType<double>>(this));
+        } else {
+            cw.reset(new TypedColumnWriter<double>(this));
+        }
+        break;
+    case String:
+        // TODO:
+        LOG(FATAL) << "unsupported type for ColumnWriter";
+        break;
+    default:
+        LOG(FATAL) << "unsupported type for ColumnWriter";
     }
 }
 

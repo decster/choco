@@ -30,6 +30,12 @@ namespace choco {
 
 using std::string;
 
+template <class T, class ST>
+inline T Padding(T v, ST pad) {
+    return (v + pad - 1) / pad * pad;
+}
+
+
 #if _POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600 ||   \
     (defined(__ANDROID__) && (__ANDROID_API__ > 16)) ||     \
     (defined(__APPLE__) &&                                  \
@@ -233,10 +239,18 @@ public:
         std::swap(_obj, rhs._obj);
     }
 
-    RefPtr& operator=(const RefPtr& rhs) {
-        RefPtr tmp = rhs;
-        tmp.swap(tmp);
+    RefPtr& operator=(const RefPtr<T>& rhs) {
+        RefPtr<T> tmp = rhs;
+        tmp.swap(*this);
         return *this;
+    }
+
+    bool operator==(const RefPtr<T>& rhs) {
+        return _obj == rhs._obj;
+    }
+
+    bool operator!=(const RefPtr<T>& rhs) {
+        return _obj != rhs._obj;
     }
 
     T* get() const {
@@ -260,7 +274,7 @@ public:
     }
 
     static RefPtr<T> create() {
-        return RefPtr<T>(new T());
+        return RefPtr<T>(new T(), false);
     }
 
 private:

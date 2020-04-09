@@ -9,7 +9,9 @@
 
 using std::string;
 
-
+/**
+ * Copy from kudu, with some minor changes
+ */
 class alignas(16) Slice {
  public:
     Slice() {}
@@ -71,7 +73,7 @@ class alignas(16) Slice {
 
   /// Change this slice to refer to an empty array.
   void clear() {
-    data_ = reinterpret_cast<const uint8_t *>("");
+    data_ = nullptr;
     size_ = 0;
   }
 

@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string>
+#include "gutil/port.h"
 #include "slice.h"
 
 using std::string;
@@ -135,6 +136,10 @@ inline Status& Status::operator=(Status&& s) {
   return *this;
 }
 
+#define RETURN_NOT_OK(s) do { \
+    const Status& _s = (s);   \
+    if (PREDICT_FALSE(!_s)) return _s;  \
+  } while (0)
 }
 
 #endif /* SRC_STATUS_H_ */
