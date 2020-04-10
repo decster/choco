@@ -13,12 +13,20 @@ struct ColumnSchema {
     bool nullable;
     unique_ptr<Variant> default_value;
 
+    ColumnSchema(const string& name, uint32_t cid, Type type, bool nullable=false) :
+        name(name),
+        cid(cid),
+        type(type),
+        nullable(nullable) {}
+
     ColumnSchema(const ColumnSchema& rhs) {
         name = rhs.name;
         cid = rhs.cid;
         type = rhs.type;
         nullable = rhs.nullable;
-        default_value.reset(new Variant(*rhs.default_value));
+        if (rhs.default_value) {
+            default_value.reset(new Variant(*rhs.default_value));
+        }
     }
 
     const void * default_value_ptr() const {

@@ -23,7 +23,7 @@ struct BufferTag {
 
 class Buffer {
 public:
-    Buffer();
+    Buffer() = default;
     ~Buffer();
 
     Status alloc(size_t size, BufferTag tag=0);

@@ -36,51 +36,45 @@ private:
 
 class ColumnReader;
 class ColumnWriter;
+template<class, bool, class> class TypedColumnReader;
 template<class, bool, class, class> class TypedColumnWriter;
+
 
 class Column : public RefCounted {
 public:
     static const uint32_t BLOCK_SIZE = 1<<16;
     static const uint32_t BLOCK_MASK = 0xffff;
 
-    Column(const ColumnSchema& cs, uint64_t version);
+    Column(const ColumnSchema& cs, Type storage_type, uint64_t version);
+    Column(const Column& rhs, size_t new_base_capacity, size_t new_version_capacity);
 
     const ColumnSchema& schema() { return _cs; }
 
-    size_t capacity() { return _capacity; }
+    Status read(uint64_t version, unique_ptr<ColumnReader>& cr);
 
-    Status read_at(uint64_t version, unique_ptr<ColumnReader>& cr);
-
-    Status start_write(unique_ptr<ColumnWriter>& cw, bool wait=false);
-    Status cancel_write(unique_ptr<ColumnWriter>& cw);
-    Status finish_write(unique_ptr<ColumnWriter>& cw, uint64_t version);
+    Status write(unique_ptr<ColumnWriter>& cw);
 
     Status delta_compaction(RefPtr<Column>& result, uint64_t to_version);
 
 private:
-    friend class ColumnReader;
-    friend class ColumnWriter;
-    template<class, bool, class, class> friend class TypedColumnWriter;
+    DISALLOW_COPY_AND_ASSIGN(Column);
 
-    void prepare_writer();
+    template<class, bool, class> friend class TypedColumnReader;
+    template<class, bool, class, class> friend class TypedColumnWriter;
 
     mutex _lock;
     ColumnSchema _cs;
     Type _storage_type;
-    std::atomic<size_t> _capacity;
-    uint32_t _base_idx = 0;
+    uint32_t _base_idx;
     vector<RefPtr<ColumnPage>> _base;
     struct VersionInfo {
+        VersionInfo() = default;
         VersionInfo(uint64_t version) : version(version) {}
-        uint64_t version;
+        uint64_t version = 0;
         // null if it's base
         RefPtr<ColumnDelta> delta;
     };
     vector<VersionInfo> _versions;
-
-    // write state
-    mutex _wlock;
-    unique_ptr<ColumnWriter> _writer;
 };
 
 
@@ -90,22 +84,22 @@ private:
 class ColumnReader {
 public:
     virtual ~ColumnReader() {}
-
+    /**
+     * store value in *dest
+     * return true if cell is not null, false if cell is null
+     */
     virtual bool get(const uint32_t rid, void * dest) const = 0;
-
+    /**
+     * return hashcode of the cell
+     */
     virtual uint64_t hashcode(const uint32_t rid) const = 0;
-
+    /**
+     * check cell value equals rhs
+     */
     virtual bool equals(const uint32_t rid, void * rhs) const = 0;
 
 protected:
-    friend class Column;
-
-    ColumnReader(RefPtr<Column>& column, uint64_t real_version, vector<ColumnPage*>& base, vector<ColumnDelta*>& deltas);
-
-    RefPtr<Column> _column;
-    uint64_t _real_version;
-    vector<ColumnPage*>& _base;
-    vector<ColumnDelta*> _deltas;
+    ColumnReader() = default;
 };
 
 /**
@@ -114,19 +108,12 @@ protected:
 class ColumnWriter {
 public:
     virtual ~ColumnWriter() {}
-    virtual Status reserve(size_t size);
-    virtual Status insert(uint32_t rid, const void * value);
-    virtual Status update(uint32_t rid, const void * value);
-    virtual Status finalize();
+    virtual Status insert(uint32_t rid, const void * value) = 0;
+    virtual Status update(uint32_t rid, const void * value) = 0;
+    virtual Status finalize(uint64_t version, RefPtr<Column>& ret) = 0;
 
 protected:
-    friend class Column;
-
-    ColumnWriter(Column* column);
-
-    Column* _column;
-    vector<RefPtr<ColumnPage>>& _base;
-    RefPtr<ColumnDelta> _delta;
+    ColumnWriter() = default;
 };
 
 

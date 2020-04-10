@@ -136,10 +136,10 @@ public:
         return add(ref, *slice, sid);
     }
 
-    Status expand(RefPtr<StringPool>& cow_pool, size_t new_capacity=0);
-
 private:
     StringPool() = default;
+
+    Status expand(RefPtr<StringPool>& cow_pool, size_t new_capacity=0);
 
     Status add_segment();
 

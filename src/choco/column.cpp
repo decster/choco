@@ -39,20 +39,18 @@ Status ColumnPage::set_not_null(uint32_t idx) {
 
 //////////////////////////////////////////////////////////////////////////////
 
-ColumnReader::ColumnReader(RefPtr<Column>& column, uint64_t real_version, vector<ColumnPage*>& base, vector<ColumnDelta*>& deltas) :
-    _column(std::move(column)),
-    _real_version(real_version),
-    _base(base),
-    _deltas(std::move(deltas)) {
-}
 
 // works for int8/int16/int32/int64/float/double
 // TODO: add string support
-template <class T, class ST=T, bool Nullable=false>
+template <class T, bool Nullable=false, class ST=T>
 class TypedColumnReader : public ColumnReader {
 public:
-    TypedColumnReader(RefPtr<Column>& column, uint64_t real_version, vector<ColumnPage*>& base, vector<ColumnDelta*>& deltas) :
-        ColumnReader(column, real_version, base, deltas) {}
+    TypedColumnReader(RefPtr<Column>& column, uint64_t version) :
+        _column(std::move(column)),
+        _base(_column->_base),
+        _version(version) {
+        _real_version = _version;
+    }
 
     virtual ~TypedColumnReader() {}
 
@@ -133,13 +131,18 @@ public:
             }
         }
     }
+
+private:
+    RefPtr<Column> _column;
+    uint64_t _version;
+    uint64_t _real_version;
+    vector<RefPtr<ColumnPage>>& _base;
+    vector<ColumnDelta*> _deltas;
 };
 
 
 
 //////////////////////////////////////////////////////////////////////////////
-
-ColumnWriter::ColumnWriter(Column* column) : _column(column), _base(column->_base) {}
 
 template <class T>
 class NullableUpdateType {
@@ -161,54 +164,37 @@ private:
 };
 
 
-template <class T, bool Nullable=false, class UT=UpdateType<T>, class ST=T>
+template <class T, bool Nullable=false, class ST=T, class UT=T>
 class TypedColumnWriter : public ColumnWriter {
 public:
-    TypedColumnWriter(Column* column) : ColumnWriter(column), _update_has_null(false) {}
+    TypedColumnWriter(RefPtr<Column>& column) :
+        _column(std::move(column)),
+        _base(&_column->_base),
+        _update_has_null(false) {
+    }
 
     virtual ~TypedColumnWriter() {}
 
-    virtual Status reserve(size_t size) {
-        if (size <= _column->_capacity) {
-            return Status::OK();
-        }
-        size_t psize = (size + Column::BLOCK_SIZE - 1) / Column::BLOCK_SIZE;
-        size_t old_size = _base.size();
-        size_t required = psize - old_size;
-        vector<RefPtr<ColumnPage>> rcs(required);
-        for (size_t i=0;i<rcs.size();i++) {
-            rcs[i] = RefPtr<ColumnPage>::create();
-            Status ret = rcs[i]->alloc(sizeof(ST)*Column::BLOCK_SIZE, 0, BufferTag::base(_column->schema().cid, (uint32_t)(old_size+i)));
-            if (!ret) {
-                return ret;
-            }
-        }
-        {
-            std::lock_guard<mutex> lg(_column->_lock);
-            _base.resize(psize);
-            for (size_t i=0;i<required;i++) {
-                _base[old_size+i].swap(rcs[i]);
-            }
-        }
-        _column->_capacity = _base.size() * Column::BLOCK_SIZE;
-        return Status::OK();
-    }
-
     virtual Status insert(uint32_t rid, const void * value) {
-        DCHECK_LT(rid, _column->_capacity);
         uint32_t bid = rid >> 16;
-        DCHECK(bid < _base.size());
+        if (bid >= _base->size()) {
+            RETURN_NOT_OK(add_page());
+            // add one page should be enough
+            CHECK(bid < _base->size());
+        }
+        auto& page = (*_base)[bid];
         uint32_t idx = rid & 0xffff;
-        DCHECK(idx * sizeof(T) < _base[bid]->data().bsize());
+        DCHECK(idx * sizeof(T) < page->data().bsize());
         if (Nullable) {
             if (value) {
                 if (std::is_same<T, ST>::value) {
-                    _base[bid]->data().as<ST>()[idx] = *static_cast<const ST*>(value);
+                    page->set_not_null(idx);
+                    page->data().as<ST>()[idx] = *static_cast<const ST*>(value);
                 } else {
                     // TODO: string support
                 }
             } else {
-                _base[bid]->set_null(idx);
+                page->set_null(idx);
             }
         } else {
             if (!value) {
@@ -216,7 +202,7 @@ public:
             }
             DCHECK_NOTNULL(value);
             if (std::is_same<T, ST>::value) {
-                _base[bid]->data().as<ST>()[idx] = *static_cast<const ST*>(value);
+                page->data().as<ST>()[idx] = *static_cast<const ST*>(value);
             } else {
                 // TODO: string support
             }
@@ -225,7 +211,7 @@ public:
     }
 
     virtual Status update(uint32_t rid, const void * value) {
-        DCHECK_LT(rid, _column->_capacity);
+        DCHECK_LT(rid, _base->size() * Column::BLOCK_SIZE);
         if (Nullable) {
             auto& uv = _updates[rid];
             if (value) {
@@ -259,18 +245,15 @@ public:
         return Status::OK();
     }
 
-    virtual Status finalize() {
+    virtual Status finalize(uint64_t version, RefPtr<Column>& ret) {
         // prepare delta
-        size_t nblock = _base.size();
+        size_t nblock = _base->size();
         RefPtr<ColumnDelta> delta = RefPtr<ColumnDelta>::create();
-        Status ret = delta->alloc(
+        RETURN_NOT_OK(delta->alloc(
                 nblock,
                 _updates.size(),
                 sizeof(ST),
-                BufferTag::delta(_column->schema().cid), _update_has_null);
-        if (!ret) {
-            return ret;
-        }
+                BufferTag::delta(_column->schema().cid), _update_has_null));
         DeltaIndex* index = delta->index();
         vector<uint32_t>& block_ends = index->_block_ends;
         Buffer& idxdata = index->_data;
@@ -299,89 +282,154 @@ public:
             cidx++;
         }
         _updates.clear();
-        _delta.swap(delta);
+        RETURN_NOT_OK(add_delta(delta, version));
+        ret.swap(_column);
         return Status::OK();
     }
 
 private:
+    Status expand_base() {
+        size_t added = std::min((size_t)128, _base->capacity());
+        size_t new_base_capacity = Padding(_base->capacity() + added, 8);
+        // check if version needs expanding too
+        size_t new_version_capacity = 0;
+        if (_column->_versions.size() == _column->_versions.capacity()) {
+            new_version_capacity = Padding(_column->_versions.capacity() + 64, 4);
+        }
+        // check pool doesn't need expanding
+        DCHECK_EQ(_base->size(), _base->capacity());
+        DCHECK(_base->capacity() < new_base_capacity);
+        RefPtr<Column> cow(new Column(*_column, new_base_capacity, new_version_capacity), false);
+        cow.swap(_column);
+        return Status::OK();
+    }
+
+    Status add_page() {
+        if (_base->size() == _base->capacity()) {
+            RETURN_NOT_OK(expand_base());
+        }
+        CHECK_LT(_base->size(), _base->capacity());
+        RefPtr<ColumnPage> page = RefPtr<ColumnPage>::create();
+        uint32_t cid = _column->schema().cid;
+        uint32_t bid = _base->size();
+        RETURN_NOT_OK(page->alloc(Column::BLOCK_SIZE, sizeof(ST), BufferTag::base(cid, bid)));
+        _base->emplace_back(std::move(page));
+        return Status::OK();
+    }
+
+    Status expand_delta() {
+        size_t new_capacity = Padding(_column->_versions.capacity() + 64, 4);
+        RefPtr<Column> cow(new Column(*_column, 0, new_capacity), false);
+        cow.swap(_column);
+        return Status::OK();
+    }
+
+    Status add_delta(RefPtr<ColumnDelta>& delta, uint64_t version) {
+        if (_column->_versions.size() == _column->_versions.capacity()) {
+            expand_delta();
+        }
+        CHECK_LT(_base->size(), _base->capacity());
+        _column->_versions.emplace_back();
+        Column::VersionInfo& vinfo = _column->_versions.back();
+        vinfo.version = version;
+        vinfo.delta.swap(delta);
+        return Status::OK();
+    }
+
+    RefPtr<Column> _column;
+    vector<RefPtr<ColumnPage>>* _base;
+
     bool _update_has_null = false;
-    std::map<uint32_t, UT> _updates;
+    typedef typename std::conditional<Nullable, NullableUpdateType<UT>, UpdateType<UT>>::type UpdateMapType;
+    std::map<uint32_t, UpdateMapType> _updates;
 };
 
 //////////////////////////////////////////////////////////////////////////////
 
-Column::Column(const ColumnSchema& cs, uint64_t version) : _cs(cs), _storage_type(cs.type), _capacity(0) {
+Column::Column(const ColumnSchema& cs, Type storage_type, uint64_t version) :
+        _cs(cs),
+        _storage_type(storage_type),
+        _base_idx(0) {
+    _base.reserve(64);
+    _versions.reserve(64);
     _versions.emplace_back(version);
 }
 
-Status Column::read_at(uint64_t version, unique_ptr<ColumnReader>& cr) {
+Column::Column(const Column& rhs, size_t new_base_capacity, size_t new_version_capacity) :
+    _cs(rhs._cs),
+    _storage_type(rhs._storage_type),
+    _base_idx(rhs._base_idx) {
+    _base.reserve(std::max(new_base_capacity, rhs._base.capacity()));
+    _base.resize(rhs._base.size());
+    for (size_t i=0;i<_base.size();i++) {
+        _base[i] = rhs._base[i];
+    }
+    _versions.reserve(std::max(new_version_capacity, rhs._versions.capacity()));
+    _versions.resize(rhs._versions.size());
+    for (size_t i=0;i<_versions.size();i++) {
+        _versions[i] = rhs._versions[i];
+    }
+}
+
+Status Column::read(uint64_t version, unique_ptr<ColumnReader>& cr) {
     Type type = schema().type;
     bool nullable = schema().nullable;
     RefPtr<Column> pcol(this);
-    uint64_t real_version = version;
-    vector<ColumnPage*> base;
-    vector<ColumnDelta*> deltas;
-    {
-        // TODO:
-        std::lock_guard<mutex> lg(_lock);
-        base.resize(_base.size());
-        memcpy(base.data(), _base.data(), sizeof(ColumnPage*)*_base.size());
-    }
     switch (type) {
     case Int8:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int8_t, int8_t, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int8_t, true>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<int8_t, int8_t, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int8_t, false>(pcol, version));
         }
         break;
     case Int16:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int16_t, int16_t, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int16_t, true>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<int16_t, int16_t, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int16_t, false>(pcol, version));
         }
         break;
     case Int32:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int32_t, int32_t, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int32_t, true>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<int32_t, int32_t, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int32_t, false>(pcol, version));
         }
         break;
     case Int64:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int64_t, int64_t, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int64_t, true>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<int64_t, int64_t, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int64_t, false>(pcol, version));
         }
         break;
     case Int128:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int128_t, int128_t, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int128_t, true>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<int128_t, int128_t, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<int128_t, false>(pcol, version));
         }
         break;
     case Float32:
         if (nullable) {
-            cr.reset(new TypedColumnReader<float, float, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<float, true>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<float, float, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<float, false>(pcol, version));
         }
         break;
     case Float64:
         if (nullable) {
-            cr.reset(new TypedColumnReader<double, double, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<double, true>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<double, double, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<double, false>(pcol, version));
         }
         break;
     case String:
         if (nullable) {
-            cr.reset(new TypedColumnReader<Slice, int32_t, true>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<Slice, true, int32_t>(pcol, version));
         } else {
-            cr.reset(new TypedColumnReader<Slice, int32_t, false>(pcol, version, base, deltas));
+            cr.reset(new TypedColumnReader<Slice, false, int32_t>(pcol, version));
         }
         break;
     default:
@@ -390,59 +438,58 @@ Status Column::read_at(uint64_t version, unique_ptr<ColumnReader>& cr) {
     return Status::OK();
 }
 
-
-void Column::prepare_writer() {
+Status Column::write(unique_ptr<ColumnWriter>& cw) {
     Type type = schema().type;
     bool nullable = schema().nullable;
-    unique_ptr<ColumnWriter> cw;
+    RefPtr<Column> pcol(this);
     switch (type) {
     case Int8:
         if (nullable) {
-            cw.reset(new TypedColumnWriter<int8_t, true, NullableUpdateType<int8_t>>(this));
+            cw.reset(new TypedColumnWriter<int8_t, true>(pcol));
         } else {
-            cw.reset(new TypedColumnWriter<int8_t>(this));
+            cw.reset(new TypedColumnWriter<int8_t>(pcol));
         }
         break;
     case Int16:
         if (nullable) {
-            cw.reset(new TypedColumnWriter<int16_t, true, NullableUpdateType<int16_t>>(this));
+            cw.reset(new TypedColumnWriter<int16_t, true>(pcol));
         } else {
-            cw.reset(new TypedColumnWriter<int16_t>(this));
+            cw.reset(new TypedColumnWriter<int16_t>(pcol));
         }
         break;
     case Int32:
         if (nullable) {
-            cw.reset(new TypedColumnWriter<int32_t, true, NullableUpdateType<int32_t>>(this));
+            cw.reset(new TypedColumnWriter<int32_t, true>(pcol));
         } else {
-            cw.reset(new TypedColumnWriter<int32_t>(this));
+            cw.reset(new TypedColumnWriter<int32_t>(pcol));
         }
         break;
     case Int64:
         if (nullable) {
-            cw.reset(new TypedColumnWriter<int64_t, true, NullableUpdateType<int64_t>>(this));
+            cw.reset(new TypedColumnWriter<int64_t, true>(pcol));
         } else {
-            cw.reset(new TypedColumnWriter<int64_t>(this));
+            cw.reset(new TypedColumnWriter<int64_t>(pcol));
         }
         break;
     case Int128:
         if (nullable) {
-            cw.reset(new TypedColumnWriter<int128_t, true, NullableUpdateType<int128_t>>(this));
+            cw.reset(new TypedColumnWriter<int128_t, true>(pcol));
         } else {
-            cw.reset(new TypedColumnWriter<int128_t>(this));
+            cw.reset(new TypedColumnWriter<int128_t>(pcol));
         }
         break;
     case Float32:
         if (nullable) {
-            cw.reset(new TypedColumnWriter<float, true, NullableUpdateType<float>>(this));
+            cw.reset(new TypedColumnWriter<float, true>(pcol));
         } else {
-            cw.reset(new TypedColumnWriter<float>(this));
+            cw.reset(new TypedColumnWriter<float>(pcol));
         }
         break;
     case Float64:
         if (nullable) {
-            cw.reset(new TypedColumnWriter<double, true, NullableUpdateType<double>>(this));
+            cw.reset(new TypedColumnWriter<double, true>(pcol));
         } else {
-            cw.reset(new TypedColumnWriter<double>(this));
+            cw.reset(new TypedColumnWriter<double>(pcol));
         }
         break;
     case String:
@@ -452,17 +499,6 @@ void Column::prepare_writer() {
     default:
         LOG(FATAL) << "unsupported type for ColumnWriter";
     }
-}
-
-Status Column::start_write(unique_ptr<ColumnWriter>& cw, bool wait) {
-    return Status::OK();
-}
-
-Status Column::cancel_write(unique_ptr<ColumnWriter>& cw) {
-    return Status::OK();
-}
-
-Status Column::finish_write(unique_ptr<ColumnWriter>& cw, uint64_t version) {
     return Status::OK();
 }
 

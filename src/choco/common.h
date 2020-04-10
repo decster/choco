@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include "gutil/macros.h"
 #include "common/logging.h"
 #include "status.h"
 #include "slice.h"
