@@ -22,6 +22,7 @@ add_executable(choco_test
   choco_test.cpp
   hash_index_test.cpp
   string_pool_test.cpp
+  column_delta_test.cpp
   column_test.cpp
 )
 target_link_libraries(choco_test ${CHOCO_LINK_LIBS} gtest)

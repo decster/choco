@@ -16,6 +16,8 @@ public:
 
     DeltaIndex() = default;
 
+    size_t memory() const;
+
     uint32_t find_idx(uint32_t rid);
 
     Buffer& index() { return _data; }
@@ -33,6 +35,8 @@ public:
 class ColumnDelta : public RefCounted {
 public:
     ColumnDelta() = default;
+
+    size_t memory() const;
 
     Buffer& nulls() { return _nulls; }
 

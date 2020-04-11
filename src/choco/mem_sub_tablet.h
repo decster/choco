@@ -9,9 +9,10 @@ namespace choco {
 
 class MemSubTablet {
 public:
-    MemSubTablet() = default;
 
 private:
+    DISALLOW_COPY_AND_ASSIGN(MemSubTablet);
+
     mutex _lock;
     HashIndex _index;
     struct VersionInfo {

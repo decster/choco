@@ -11,6 +11,8 @@ class ColumnPage : public RefCounted {
 public:
     ColumnPage() = default;
 
+    size_t memory() const;
+
     Buffer& data() { return _data; }
 
     Buffer& nulls() { return _nulls; }
@@ -50,11 +52,15 @@ public:
 
     const ColumnSchema& schema() { return _cs; }
 
+    size_t memory() const;
+
     Status read(uint64_t version, unique_ptr<ColumnReader>& cr);
 
     Status write(unique_ptr<ColumnWriter>& cw);
 
     Status delta_compaction(RefPtr<Column>& result, uint64_t to_version);
+
+    string to_string() const;
 
 private:
     DISALLOW_COPY_AND_ASSIGN(Column);
@@ -62,10 +68,13 @@ private:
     template<class, bool, class> friend class TypedColumnReader;
     template<class, bool, class, class> friend class TypedColumnWriter;
 
+    Status capture_version(uint64_t version, vector<ColumnDelta*>& deltas, uint64_t& real_version) const;
+
     mutex _lock;
     ColumnSchema _cs;
     Type _storage_type;
     uint32_t _base_idx;
+    // TODO: not strictly thread-safe, use a thread-safe append only vector instead
     vector<RefPtr<ColumnPage>> _base;
     struct VersionInfo {
         VersionInfo() = default;
@@ -98,6 +107,11 @@ public:
      */
     virtual bool equals(const uint32_t rid, void * rhs) const = 0;
 
+    /**
+     * get basic info about this reader
+     */
+    virtual string to_string() const = 0;
+
 protected:
     ColumnReader() = default;
 };
@@ -111,6 +125,7 @@ public:
     virtual Status insert(uint32_t rid, const void * value) = 0;
     virtual Status update(uint32_t rid, const void * value) = 0;
     virtual Status finalize(uint64_t version, RefPtr<Column>& ret) = 0;
+    virtual string to_string() const = 0;
 
 protected:
     ColumnWriter() = default;

@@ -2,6 +2,10 @@
 
 namespace choco {
 
+string ColumnSchema::to_string() const {
+    return Format("Column(%s cid=%u %s%s)", name.c_str(), cid, TypeInfo::get(type).name().c_str(), nullable?" null":"");
+}
+
 
 Schema::Schema(vector<ColumnSchema>& columns, uint32_t num_key_column) {
     CHECK_GT(num_key_column, columns.size());

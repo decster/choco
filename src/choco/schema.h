@@ -29,6 +29,8 @@ struct ColumnSchema {
         }
     }
 
+    string to_string() const;
+
     const void * default_value_ptr() const {
         return default_value ? default_value->value() : nullptr;
     }

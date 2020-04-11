@@ -2,7 +2,14 @@
 
 namespace choco {
 
+size_t DeltaIndex::memory() const {
+    return _data.bsize() + _block_ends.size() * sizeof(uint32_t);
+}
+
 uint32_t DeltaIndex::find_idx(uint32_t rid) {
+    if (!_data) {
+        return npos;
+    }
     uint32_t bid = rid >> 16;
     if (bid >= _block_ends.size()) {
         return npos;
@@ -10,11 +17,14 @@ uint32_t DeltaIndex::find_idx(uint32_t rid) {
     // TODO: use SIMD
     uint32_t start = bid > 0 ? _block_ends[bid-1]:0;
     uint32_t end = _block_ends[bid];
+    if (start == end) {
+        return npos;
+    }
     uint16_t * astart = _data.as<uint16_t>() + start;
     uint16_t * aend = _data.as<uint16_t>() + end;
     uint32_t bidx = rid & 0xffff;
     uint16_t* pos = std::lower_bound(astart, aend, bidx);
-    if (*pos == bidx) {
+    if ((pos != aend) && (*pos == bidx)) {
         return pos - _data.as<uint16_t>();
     } else {
         return npos;
@@ -23,6 +33,10 @@ uint32_t DeltaIndex::find_idx(uint32_t rid) {
 
 
 //////////////////////////////////////////////////////////////////////////////
+
+size_t ColumnDelta::memory() const {
+    return _index->memory() + _nulls.bsize() + _data.bsize();
+}
 
 Status ColumnDelta::alloc(size_t nblock, size_t size, size_t esize, BufferTag tag, bool has_null) {
     if (_data || _nulls) {

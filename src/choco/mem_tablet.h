@@ -31,6 +31,9 @@ private:
 
     mutex _lock;
     struct VersionInfo {
+        VersionInfo(uint64_t version, unique_ptr<Schema>& schema) :
+            version(version), schema(std::move(schema)) {
+        }
         uint64_t version;
         unique_ptr<Schema> schema;
     };

@@ -4,6 +4,10 @@
 
 namespace choco {
 
+size_t ColumnPage::memory() const {
+    return _data.bsize() + _nulls.bsize();
+}
+
 Status ColumnPage::alloc(size_t size, size_t esize, BufferTag tag) {
     if (_data || _nulls) {
         LOG(FATAL) << "reinit column page";
@@ -45,11 +49,12 @@ Status ColumnPage::set_not_null(uint32_t idx) {
 template <class T, bool Nullable=false, class ST=T>
 class TypedColumnReader : public ColumnReader {
 public:
-    TypedColumnReader(RefPtr<Column>& column, uint64_t version) :
+    TypedColumnReader(RefPtr<Column>& column, uint64_t version, uint64_t real_version, vector<ColumnDelta*>& deltas) :
         _column(std::move(column)),
         _base(_column->_base),
-        _version(version) {
-        _real_version = _version;
+        _version(version),
+        _real_version(real_version),
+        _deltas(std::move(deltas)) {
     }
 
     virtual ~TypedColumnReader() {}
@@ -59,7 +64,7 @@ public:
         for (ssize_t i=_deltas.size()-1;i>=0;i--) {
             ColumnDelta* pdelta = _deltas[i];
             uint32_t pos = pdelta->find_idx(rid);
-            if (pos != (uint32_t)-1) {
+            if (pos != DeltaIndex::npos) {
                 if (Nullable) {
                     isnull = pdelta->nulls() && pdelta->nulls().as<bool>()[pos];
                     if (!isnull) {
@@ -69,6 +74,7 @@ public:
                     isnull = false;
                     pcell = &(pdelta->data().as<ST>()[pos]);
                 }
+                return;
             }
         }
         uint32_t bid = rid >> 16;
@@ -130,6 +136,14 @@ public:
                 return false;
             }
         }
+    }
+
+    virtual string to_string() const {
+        return Format("%s version=%zu rversion=%zu ndelta=%zu",
+                _column->to_string().c_str(),
+                _version,
+                _real_version,
+                _deltas.size());
     }
 
 private:
@@ -207,6 +221,7 @@ public:
                 // TODO: string support
             }
         }
+        _num_insert++;
         return Status::OK();
     }
 
@@ -242,10 +257,16 @@ public:
                 // TODO: string support
             }
         }
+        _num_update++;
         return Status::OK();
     }
 
     virtual Status finalize(uint64_t version, RefPtr<Column>& ret) {
+        if (_updates.size() == 0) {
+            // insert(append) only
+            ret.swap(_column);
+            return Status::OK();
+        }
         // prepare delta
         size_t nblock = _base->size();
         RefPtr<ColumnDelta> delta = RefPtr<ColumnDelta>::create();
@@ -281,15 +302,26 @@ public:
             }
             cidx++;
         }
+        while (curbid < nblock) {
+            block_ends[curbid] = cidx;
+            curbid++;
+        }
         _updates.clear();
         RETURN_NOT_OK(add_delta(delta, version));
         ret.swap(_column);
         return Status::OK();
     }
 
+    virtual string to_string() const {
+        return Format("%s insert:%zu update:%zu",
+                _column->to_string().c_str(),
+                _num_insert,
+                _num_update);
+    }
+
 private:
     Status expand_base() {
-        size_t added = std::min((size_t)128, _base->capacity());
+        size_t added = std::min((size_t)256, _base->capacity());
         size_t new_base_capacity = Padding(_base->capacity() + added, 8);
         // check if version needs expanding too
         size_t new_version_capacity = 0;
@@ -299,12 +331,19 @@ private:
         // check pool doesn't need expanding
         DCHECK_EQ(_base->size(), _base->capacity());
         DCHECK(_base->capacity() < new_base_capacity);
+        DLOG(INFO) << Format("%s memory=%.1lfM expand base base=%zu version=%zu",
+                             _column->schema().to_string().c_str(),
+                             _column->memory() / 1000000.0,
+                             new_base_capacity,
+                             new_version_capacity);
         RefPtr<Column> cow(new Column(*_column, new_base_capacity, new_version_capacity), false);
         cow.swap(_column);
+        _base = &(_column->_base);
         return Status::OK();
     }
 
     Status add_page() {
+        //DLOG(INFO) << Format("Column(cid=%u) add ColumnPage %zu/%zu", _column->schema().cid, _base->size(), _base->capacity());
         if (_base->size() == _base->capacity()) {
             RETURN_NOT_OK(expand_base());
         }
@@ -319,6 +358,11 @@ private:
 
     Status expand_delta() {
         size_t new_capacity = Padding(_column->_versions.capacity() + 64, 4);
+        DLOG(INFO) << Format("%s memory=%.1lfM expand delta base=%zu version=%zu",
+                             _column->schema().to_string().c_str(),
+                             _column->memory() / 1000000.0,
+                             _base->capacity(),
+                             new_capacity);
         RefPtr<Column> cow(new Column(*_column, 0, new_capacity), false);
         cow.swap(_column);
         return Status::OK();
@@ -339,6 +383,8 @@ private:
     RefPtr<Column> _column;
     vector<RefPtr<ColumnPage>>* _base;
 
+    size_t _num_insert = 0;
+    size_t _num_update = 0;
     bool _update_has_null = false;
     typedef typename std::conditional<Nullable, NullableUpdateType<UT>, UpdateType<UT>>::type UpdateMapType;
     std::map<uint32_t, UpdateMapType> _updates;
@@ -371,65 +417,141 @@ Column::Column(const Column& rhs, size_t new_base_capacity, size_t new_version_c
     }
 }
 
+size_t Column::memory() const {
+    size_t bs = _base.size();
+    size_t ds = _versions.size();
+    size_t base_memory = 0;
+    for (size_t i=0;i<bs;i++) {
+        base_memory += _base[i]->memory();
+    }
+    size_t delta_memory = 0;
+    for (size_t i=0;i<ds;i++) {
+        if (_versions[i].delta) {
+            delta_memory += _versions[i].delta->memory();
+        }
+    }
+    return base_memory + delta_memory;
+}
+
+string Column::to_string() const {
+    string storage_info;
+    if (_storage_type != _cs.type) {
+        storage_info = Format(" storage:%s", TypeInfo::get(_cs.type).name().c_str());
+    }
+    return Format("Column(%s cid=%u version=%zu %s%s%s)",
+            _cs.name.c_str(),
+            _cs.cid,
+            _versions.back().version,
+            TypeInfo::get(_cs.type).name().c_str(),
+            _cs.nullable?" null":"",
+            storage_info.c_str());
+}
+
+
+Status Column::capture_version(uint64_t version, vector<ColumnDelta*>& deltas, uint64_t& real_version) const {
+    uint64_t base_version = _versions[_base_idx].version;
+    real_version = base_version;
+    if (version < base_version) {
+        uint64_t oldest = _versions[0].version;
+        if (version < oldest) {
+            return Status::NotFound(Format("version %zu(oldest=%zu) deleted", version, oldest));
+        }
+        DCHECK_GT(_base_idx, 0);
+        for (ssize_t i = _base_idx-1; i>=0;i--) {
+            uint64_t v = _versions[i].version;
+            if (v >= version) {
+                DCHECK(_versions[i].delta);
+                real_version = v;
+                deltas.emplace_back(_versions[i].delta.get());
+                if (v == version) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    } else if (version > base_version) {
+        size_t vsize = _versions.size();
+        for (size_t i = _base_idx + 1; i < vsize; i++) {
+            uint64_t v = _versions[i].version;
+            if (v <= version) {
+                DCHECK(_versions[i].delta);
+                real_version = v;
+                deltas.emplace_back(_versions[i].delta.get());
+                if (v == version) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    return Status::OK();
+}
+
+
 Status Column::read(uint64_t version, unique_ptr<ColumnReader>& cr) {
     Type type = schema().type;
     bool nullable = schema().nullable;
+    vector<ColumnDelta*> deltas;
+    uint64_t real_version;
+    RETURN_NOT_OK(capture_version(version, deltas, real_version));
     RefPtr<Column> pcol(this);
     switch (type) {
     case Int8:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int8_t, true>(pcol, version));
+            cr.reset(new TypedColumnReader<int8_t, true>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<int8_t, false>(pcol, version));
+            cr.reset(new TypedColumnReader<int8_t, false>(pcol, version, real_version, deltas));
         }
         break;
     case Int16:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int16_t, true>(pcol, version));
+            cr.reset(new TypedColumnReader<int16_t, true>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<int16_t, false>(pcol, version));
+            cr.reset(new TypedColumnReader<int16_t, false>(pcol, version, real_version, deltas));
         }
         break;
     case Int32:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int32_t, true>(pcol, version));
+            cr.reset(new TypedColumnReader<int32_t, true>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<int32_t, false>(pcol, version));
+            cr.reset(new TypedColumnReader<int32_t, false>(pcol, version, real_version, deltas));
         }
         break;
     case Int64:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int64_t, true>(pcol, version));
+            cr.reset(new TypedColumnReader<int64_t, true>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<int64_t, false>(pcol, version));
+            cr.reset(new TypedColumnReader<int64_t, false>(pcol, version, real_version, deltas));
         }
         break;
     case Int128:
         if (nullable) {
-            cr.reset(new TypedColumnReader<int128_t, true>(pcol, version));
+            cr.reset(new TypedColumnReader<int128_t, true>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<int128_t, false>(pcol, version));
+            cr.reset(new TypedColumnReader<int128_t, false>(pcol, version, real_version, deltas));
         }
         break;
     case Float32:
         if (nullable) {
-            cr.reset(new TypedColumnReader<float, true>(pcol, version));
+            cr.reset(new TypedColumnReader<float, true>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<float, false>(pcol, version));
+            cr.reset(new TypedColumnReader<float, false>(pcol, version, real_version, deltas));
         }
         break;
     case Float64:
         if (nullable) {
-            cr.reset(new TypedColumnReader<double, true>(pcol, version));
+            cr.reset(new TypedColumnReader<double, true>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<double, false>(pcol, version));
+            cr.reset(new TypedColumnReader<double, false>(pcol, version, real_version, deltas));
         }
         break;
     case String:
         if (nullable) {
-            cr.reset(new TypedColumnReader<Slice, true, int32_t>(pcol, version));
+            cr.reset(new TypedColumnReader<Slice, true, int32_t>(pcol, version, real_version, deltas));
         } else {
-            cr.reset(new TypedColumnReader<Slice, false, int32_t>(pcol, version));
+            cr.reset(new TypedColumnReader<Slice, false, int32_t>(pcol, version, real_version, deltas));
         }
         break;
     default:

@@ -14,6 +14,16 @@ gtest/gtest-all.cc
 )
 target_include_directories(gtest PRIVATE gtest)
 
+add_library(glog STATIC
+glog/demangle.cc
+glog/logging.cc
+glog/raw_logging.cc
+glog/signalhandler.cc
+glog/symbolize.cc
+glog/utilities.cc
+glog/vlog_is_on.cc
+)
+
 add_subdirectory(gutil)
 add_subdirectory(choco)
 

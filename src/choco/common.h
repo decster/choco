@@ -36,6 +36,11 @@ inline T Padding(T v, ST pad) {
     return (v + pad - 1) / pad * pad;
 }
 
+template <class T, class ST>
+inline size_t NBlock(T v, ST bs) {
+    return (v + bs - 1) / bs;
+}
+
 
 #if _POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600 ||   \
     (defined(__ANDROID__) && (__ANDROID_API__ > 16)) ||     \
@@ -246,11 +251,11 @@ public:
         return *this;
     }
 
-    bool operator==(const RefPtr<T>& rhs) {
+    bool operator==(const RefPtr<T>& rhs) const {
         return _obj == rhs._obj;
     }
 
-    bool operator!=(const RefPtr<T>& rhs) {
+    bool operator!=(const RefPtr<T>& rhs) const {
         return _obj != rhs._obj;
     }
 
