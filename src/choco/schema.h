@@ -34,17 +34,23 @@ struct ColumnSchema {
     const void * default_value_ptr() const {
         return default_value ? default_value->value() : nullptr;
     }
+
+    static Status create(uint32_t cid, const Slice& desc, unique_ptr<ColumnSchema>& cs);
 };
 
 
 class Schema {
 public:
     Schema(vector<ColumnSchema>& columns, uint32_t num_key_column);
-    ~Schema() = default;
+    ~Schema();
 
     uint32_t next_cid() const;
     const ColumnSchema* get(const string& name) const;
     const ColumnSchema* get(uint32_t cid) const;
+    const vector<ColumnSchema>& columns() const { return _columns; }
+    uint32_t num_key_column() const { return _num_key_column; }
+
+    static Status create(const Slice& desc, unique_ptr<Schema>& schema);
 
 private:
     vector<ColumnSchema> _columns;

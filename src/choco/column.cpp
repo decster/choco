@@ -399,6 +399,7 @@ Column::Column(const ColumnSchema& cs, Type storage_type, uint64_t version) :
     _base.reserve(64);
     _versions.reserve(64);
     _versions.emplace_back(version);
+    DLOG(INFO) << Format("create %s", to_string().c_str());
 }
 
 Column::Column(const Column& rhs, size_t new_base_capacity, size_t new_version_capacity) :

@@ -1,0 +1,1 @@
+build/flatbuffers/flatc -c  -o src/choco  src/choco/data.fbs

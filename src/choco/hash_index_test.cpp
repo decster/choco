@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "choco/hash_index.h"
+#include "hash_index.h"
 
 namespace choco {
 

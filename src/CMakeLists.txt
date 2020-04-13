@@ -25,5 +25,6 @@ glog/vlog_is_on.cc
 )
 
 add_subdirectory(gutil)
+add_subdirectory(flatbuffers)
 add_subdirectory(choco)
 
