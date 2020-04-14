@@ -56,18 +56,20 @@ Schema::Schema(vector<ColumnSchema>& columns, uint32_t num_key_column) {
     _num_key_column = num_key_column;
     for (auto& c : _columns) {
         _name_to_col[c.name] = &c;
-        _cid_to_col[c.cid] = &c;
         max_cid = std::max(c.cid, max_cid);
     }
-    _next_cid = max_cid+1;
+    _cid_size = max_cid+1;
+    _cid_to_col.resize(_cid_size, nullptr);
+    for (auto& c : _columns) {
+        _cid_to_col[c.cid] = &c;
+    }
 }
 
 Schema::~Schema() {
-
 }
 
-uint32_t Schema::next_cid() const {
-    return _next_cid;
+uint32_t Schema::cid_size() const {
+    return _cid_size;
 }
 
 const ColumnSchema* Schema::get(const string& name) const {
@@ -80,11 +82,10 @@ const ColumnSchema* Schema::get(const string& name) const {
 }
 
 const ColumnSchema* Schema::get(uint32_t cid) const {
-    auto itr = _cid_to_col.find(cid);
-    if (itr == _cid_to_col.end()) {
-        return nullptr;
+    if (cid < _cid_to_col.size()) {
+        return _cid_to_col[cid];
     } else {
-        return itr->second;
+        return nullptr;
     }
 }
 

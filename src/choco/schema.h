@@ -8,6 +8,7 @@ namespace choco {
 
 struct ColumnSchema {
     string name;
+    // column id, must starts with 1 (0 is special id reserved for delete flag column)
     uint32_t cid;
     Type type;
     bool nullable;
@@ -44,7 +45,7 @@ public:
     Schema(vector<ColumnSchema>& columns, uint32_t num_key_column);
     ~Schema();
 
-    uint32_t next_cid() const;
+    uint32_t cid_size() const;
     const ColumnSchema* get(const string& name) const;
     const ColumnSchema* get(uint32_t cid) const;
     const vector<ColumnSchema>& columns() const { return _columns; }
@@ -55,9 +56,9 @@ public:
 private:
     vector<ColumnSchema> _columns;
     uint32_t _num_key_column = 0;
-    uint32_t _next_cid;
+    uint32_t _cid_size;
     unordered_map<string, ColumnSchema*> _name_to_col;
-    unordered_map<uint32_t, ColumnSchema*> _cid_to_col;
+    vector<ColumnSchema*> _cid_to_col;
 };
 
 

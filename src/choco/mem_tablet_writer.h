@@ -3,11 +3,13 @@
 
 #include "common.h"
 #include "schema.h"
+#include "write_tx.h"
 
 namespace choco {
 
 class MemTablet;
-
+class Column;
+class ColumnWriter;
 
 class MemTabletWriter {
 public:
@@ -17,25 +19,29 @@ public:
 
     Status init();
 
-    // for test with demo table (int32 id,int32 uv,int32 pv,int8 city null)
-    Status insert(int32_t key, int32_t uv, int32_t pv, int8_t * pcity);
-
-    Status update_uv(int32_t key, int32_t uv);
-
-    Status update_pv(int32_t key, int32_t pv);
-
-    Status update_city(int32_t key, int8_t* pcity);
+    Status set(unique_ptr<WriteTx>& tx);
 
     Status commit(uint64_t version);
 
 private:
     friend class MemTablet;
     DISALLOW_COPY_AND_ASSIGN(MemTabletWriter);
+    struct ColumnWriteState {
+        RefPtr<Column> column;
+        unique_ptr<ColumnWriter> writer;
+    };
 
     MemTabletWriter(shared_ptr<MemTablet>&& tablet, const Schema& write_schema);
 
+    ColumnWriteState& get_write(uint32_t cid);
+
+    Status apply();
+
     shared_ptr<MemTablet> _tablet;
     Schema _write_schema;
+    unique_ptr<WriteTx> _wtx;
+    size_t num_rows;
+    unordered_map<uint32_t, ColumnWriteState> _columns;
 };
 
 } /* namespace choco */
