@@ -37,12 +37,11 @@ const uint8_t* PartialRowBatch::get_row(size_t idx) const {
 
 //////////////////////////////////////////////////////////////////////////////
 
-PartialRowWriter::PartialRowWriter(PartialRowBatch& batch) :
-        _batch(batch),
-        _schema(&batch.schema()),
-        _bit_set_size(_schema->cid_size()),
+PartialRowWriter::PartialRowWriter(const Schema& schema) :
+        _schema(schema),
+        _bit_set_size(_schema.cid_size()),
         _bit_null_size(0) {
-    _temp_cells.resize(_schema->cid_size());
+    _temp_cells.resize(_schema.cid_size());
 }
 
 PartialRowWriter::~PartialRowWriter() {
@@ -54,26 +53,26 @@ void PartialRowWriter::start_row() {
     memset(&(_temp_cells[0]), 0, sizeof(CellInfo)*_temp_cells.size());
 }
 
-Status PartialRowWriter::end_row() {
-    if (_batch._row_offsets.size() >= _batch.row_capacity()) {
+Status PartialRowWriter::write_row_to_batch(PartialRowBatch& batch) {
+    if (batch._row_offsets.size() >= batch.row_capacity()) {
         return Status::InvalidArgument("over capacity");
     }
     size_t row_byte_size = byte_size();
-    if (_batch.byte_size() + row_byte_size + 4 > _batch.byte_capacity()) {
+    if (batch.byte_size() + row_byte_size + 4 > batch.byte_capacity()) {
         return Status::InvalidArgument("over capacity");
     }
-    *(uint32_t*)(_batch._data + _batch._bsize) = row_byte_size;
-    uint8_t* pos = _batch._data + _batch._bsize + 4;
+    *(uint32_t*)(batch._data + batch._bsize) = row_byte_size;
+    uint8_t* pos = batch._data + batch._bsize + 4;
     RETURN_NOT_OK(write(pos));
     //DLOG(INFO) << Format("write row %zu at %zu", _batch._row_offsets.size(), _batch._bsize+4);
-    _batch._row_offsets.push_back(_batch._bsize);
-    _batch._bsize = pos - _batch._data;
+    batch._row_offsets.push_back(batch._bsize);
+    batch._bsize = pos - batch._data;
     return Status::OK();
 }
 
 
 Status PartialRowWriter::set(const string& col, void* data) {
-    auto cs =  _schema->get(col);
+    auto cs =  _schema.get(col);
     if (!cs) {
         return Status::NotFound("col name not found");
     }
@@ -97,7 +96,7 @@ Status PartialRowWriter::set(const string& col, void* data) {
 }
 
 Status PartialRowWriter::set(uint32_t cid, void* data) {
-    auto cs = _schema->get(cid);
+    auto cs = _schema.get(cid);
     if (!cs) {
         return Status::NotFound("cid not found");
     }
@@ -130,7 +129,7 @@ size_t PartialRowWriter::byte_size() const {
     size_t data_size = 2 + bit_all_size;
     for (size_t i=1;i<_temp_cells.size();i++) {
         if (_temp_cells[i].data) {
-            Type type = _schema->get(i)->type;
+            Type type = _schema.get(i)->type;
             if (type == String) {
                 data_size += 2 + ((Slice*)(_temp_cells[i].data))->size();
             } else {
@@ -167,7 +166,7 @@ Status PartialRowWriter::write(uint8_t*& pos) {
             }
             uint8_t *pdata = _temp_cells[i].data;
             if (pdata) {
-                Type type = _schema->get(i)->type;
+                Type type = _schema.get(i)->type;
                 if (type == String) {
                     size_t sz = ((Slice*)pdata)->size();
                     *(uint16_t*)pos = (uint16_t)sz;
@@ -180,7 +179,7 @@ Status PartialRowWriter::write(uint8_t*& pos) {
                     pos += sz;
                 }
             }
-        } else if (i <= _schema->num_key_column()) {
+        } else if (i <= _schema.num_key_column()) {
             return Status::InvalidArgument("build without key columns");
         }
     }
@@ -189,7 +188,7 @@ Status PartialRowWriter::write(uint8_t*& pos) {
 
 
 
-PartialRowReader::PartialRowReader(PartialRowBatch& batch) :
+PartialRowReader::PartialRowReader(const PartialRowBatch& batch) :
         _batch(batch),
         _schema(&batch.schema()),
         _bit_set_size(_schema->cid_size()),

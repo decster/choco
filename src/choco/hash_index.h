@@ -13,7 +13,7 @@ struct HashChunk;
 /**
  * Hash Index from hashcode -> row id(uint32)
  */
-class HashIndex {
+class HashIndex : public RefCounted {
 public:
     static const uint32_t NOSLOT = (uint32_t)-1;
     struct Entry {
@@ -34,6 +34,8 @@ public:
     uint32_t find(uint64_t keyHash, std::vector<Entry> &entries);
 
     void set(uint32_t entry, uint64_t keyHash, uint32_t value);
+
+    bool add(uint64_t keyHash, uint32_t value);
 
     bool need_rehash() {
         return _size >= _max_size;

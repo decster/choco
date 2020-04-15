@@ -36,11 +36,11 @@ private:
 
 class PartialRowWriter {
 public:
-    PartialRowWriter(PartialRowBatch& batch);
+    PartialRowWriter(const Schema& schema);
     ~PartialRowWriter();
 
     void start_row();
-    Status end_row();
+    Status write_row_to_batch(PartialRowBatch& batch);
 
     /**
      * set cell value by column name
@@ -54,8 +54,7 @@ private:
     size_t byte_size() const;
     Status write(uint8_t*& pos);
 
-    PartialRowBatch& _batch;
-    const Schema* _schema;
+    const Schema& _schema;
     struct CellInfo {
         CellInfo() = default;
         uint32_t isset = 0;
@@ -70,14 +69,14 @@ private:
 
 class PartialRowReader {
 public:
-    PartialRowReader(PartialRowBatch& batch);
+    PartialRowReader(const PartialRowBatch& batch);
     size_t size() const { return _batch.row_size(); }
     Status read(size_t idx);
     size_t cell_size() const { return _cells.size(); }
     Status get_cell(size_t idx, const ColumnSchema*& cs, const void*& data) const;
 
 private:
-    PartialRowBatch& _batch;
+    const PartialRowBatch& _batch;
     const Schema* _schema;
     bool _delete;
     size_t _bit_set_size;

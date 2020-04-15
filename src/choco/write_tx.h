@@ -11,14 +11,16 @@ public:
     WriteTx(const Schema& schema);
     ~WriteTx();
 
-    void add_batch(unique_ptr<PartialRowBatch>& batch);
+    const Schema& schema() const { return _schema; }
 
     size_t batch_size() const { return _batches.size(); }
 
     const PartialRowBatch * get_batch(size_t idx) const;
 
+    PartialRowBatch* new_batch();
+
 private:
-    Schema _schama;
+    Schema _schema;
     vector<unique_ptr<PartialRowBatch>> _batches;
 };
 

@@ -8,7 +8,7 @@ TEST(PartialRowbatch, write) {
     unique_ptr<Schema> sc;
     ASSERT_TRUE(Schema::create("int32 id,int32 uv,int32 pv,int8 city null,string ss null", sc));
     PartialRowBatch rb(*sc, 100000, 1000);
-    PartialRowWriter writer(rb);
+    PartialRowWriter writer(*sc);
     srand(1);
     const int N = 1000;
     size_t nrow = 0;
@@ -28,7 +28,7 @@ TEST(PartialRowbatch, write) {
             EXPECT_TRUE(writer.set("city", city%2==0?nullptr:&city));
             EXPECT_TRUE(writer.set("ss", &ss));
         }
-        EXPECT_TRUE(writer.end_row());
+        EXPECT_TRUE(writer.write_row_to_batch(rb));
     }
     EXPECT_EQ(rb.row_size(), nrow);
 

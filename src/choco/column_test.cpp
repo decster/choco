@@ -25,13 +25,13 @@ struct ColumnTest {
             EXPECT_TRUE(writer->insert((uint32_t)i, &values[i]));
         }
         RefPtr<Column> newc;
-        ASSERT_TRUE(writer->finalize(2, newc));
+        ASSERT_TRUE(writer->finalize(2));
+        ASSERT_TRUE(writer->get_new_column(newc));
         EXPECT_TRUE(c != newc);
         unique_ptr<ColumnReader> readc;
         ASSERT_TRUE(newc->read(2, readc));
         for (uint32_t i=0;i<values.size();i++) {
-            CppType value = 0;
-            EXPECT_TRUE(readc->get(i, &value));
+            CppType value = *(CppType*)readc->get(i);
             EXPECT_EQ(value, values[i]);
         }
     }
@@ -52,16 +52,17 @@ struct ColumnTest {
             }
         }
         RefPtr<Column> newc;
-        ASSERT_TRUE(writer->finalize(2, newc));
+        ASSERT_TRUE(writer->finalize(2));
+        ASSERT_TRUE(writer->get_new_column(newc));
         EXPECT_TRUE(c != newc);
         unique_ptr<ColumnReader> readc;
         ASSERT_TRUE(newc->read(2, readc));
         for (uint32_t i=0;i<values.size();i++) {
             CppType value = 0;
             if (is_null(values[i])) {
-                EXPECT_FALSE(readc->get(i, &value));
+                EXPECT_TRUE(readc->get(i) == nullptr);
             } else {
-                EXPECT_TRUE(readc->get(i, &value));
+                CppType value = *(CppType*)readc->get(i);
                 EXPECT_EQ(value, values[i]);
             }
         }
@@ -80,7 +81,8 @@ struct ColumnTest {
             values[i] = (CppType)HashCode(i);
             EXPECT_TRUE(writer->insert((uint32_t)i, &values[i]));
         }
-        ASSERT_TRUE(writer->finalize(++version, c));
+        ASSERT_TRUE(writer->finalize(++version));
+        ASSERT_TRUE(writer->get_new_column(c));
         writer.reset();
         RefPtr<Column> oldc = c;
         for (size_t u=0;u<UpdateTime;u++) {
@@ -94,15 +96,15 @@ struct ColumnTest {
                 EXPECT_TRUE(writer->update(idx, &values[idx]));
                 update_idxs.push_back(idx);
             }
-            ASSERT_TRUE(writer->finalize(++version, c));
+            ASSERT_TRUE(writer->finalize(++version));
+            ASSERT_TRUE(writer->get_new_column(c));
             //DLOG(INFO) << Format("update %zu writer: %s", u, writer->to_string().c_str());
             writer.reset();
             unique_ptr<ColumnReader> readc;
             ASSERT_TRUE(c->read(version, readc));
             //DLOG(INFO) << Format("read %zu reader: %s", u, readc->to_string().c_str());
             for (uint32_t i : update_idxs) {
-                CppType value = 0;
-                EXPECT_TRUE(readc->get(i, &value));
+                CppType value = *(CppType*)readc->get(i);
                 EXPECT_EQ(value, values[i]) << Format("values[%u]", i);
             }
         }
@@ -129,7 +131,8 @@ struct ColumnTest {
                 EXPECT_TRUE(writer->insert((uint32_t)i, &values[i]));
             }
         }
-        ASSERT_TRUE(writer->finalize(++version, c));
+        ASSERT_TRUE(writer->finalize(++version));
+        ASSERT_TRUE(writer->get_new_column(c));
         writer.reset();
         RefPtr<Column> oldc = c;
         for (size_t u=0;u<UpdateTime;u++) {
@@ -145,7 +148,8 @@ struct ColumnTest {
                 }
                 update_idxs.push_back(idx);
             }
-            ASSERT_TRUE(writer->finalize(++version, c));
+            ASSERT_TRUE(writer->finalize(++version));
+            ASSERT_TRUE(writer->get_new_column(c));
             //DLOG(INFO) << Format("update %zu writer: %s", u, writer->to_string().c_str());
             writer.reset();
             unique_ptr<ColumnReader> readc;
@@ -154,9 +158,9 @@ struct ColumnTest {
             for (uint32_t i : update_idxs) {
                 CppType value = 0;
                 if (is_null(values[i])) {
-                    EXPECT_FALSE(readc->get(i, &value));
+                    EXPECT_TRUE(readc->get(i) == nullptr);
                 } else {
-                    EXPECT_TRUE(readc->get(i, &value));
+                    CppType value = *(CppType*)readc->get(i);
                     EXPECT_EQ(value, values[i]) << Format("values[%u]", i);
                 }
             }
@@ -179,22 +183,22 @@ struct ColumnTest {
 
 
 TEST(Column, insert) {
-    ColumnTest<Int8>::test();
+    //ColumnTest<Int8>::test();
     ColumnTest<Int16>::test();
-    ColumnTest<Int32>::test();
+    //ColumnTest<Int32>::test();
     ColumnTest<Int64>::test();
-    ColumnTest<Int128>::test();
+    //ColumnTest<Int128>::test();
     ColumnTest<Float32>::test();
-    ColumnTest<Float64>::test();
+    //ColumnTest<Float64>::test();
 }
 
 TEST(Column, update) {
     ColumnTest<Int8>::test_update();
-    ColumnTest<Int16>::test_update();
+    //ColumnTest<Int16>::test_update();
     ColumnTest<Int32>::test_update();
-    ColumnTest<Int64>::test_update();
+    //ColumnTest<Int64>::test_update();
     ColumnTest<Int128>::test_update();
-    ColumnTest<Float32>::test_update();
+    //ColumnTest<Float32>::test_update();
     ColumnTest<Float64>::test_update();
 }
 

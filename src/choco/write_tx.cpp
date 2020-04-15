@@ -2,14 +2,15 @@
 
 namespace choco {
 
-WriteTx::WriteTx(const Schema& schema) : _schama(schema) {
+WriteTx::WriteTx(const Schema& schema) : _schema(schema) {
 }
 
 WriteTx::~WriteTx() {
 }
 
-void WriteTx::add_batch(unique_ptr<PartialRowBatch>& batch) {
-
+PartialRowBatch* WriteTx::new_batch() {
+    _batches.emplace_back(new PartialRowBatch(_schema, 1000000, 1<<15));
+    return _batches.back().get();
 }
 
 const PartialRowBatch * WriteTx::get_batch(size_t idx) const {

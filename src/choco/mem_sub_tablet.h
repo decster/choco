@@ -7,26 +7,49 @@
 
 namespace choco {
 
+class PartialRowReader;
+
 class MemSubTablet {
 public:
 	static Status create(uint64_t version, const Schema& schema, unique_ptr<MemSubTablet>& ret);
 
-    ~MemSubTablet();
+	~MemSubTablet();
+
+    size_t latest_size() { return _versions.back().size; }
+
+    /**
+     * caller should make sure schema valid during write
+     */
+    Status begin_write(const Schema& schema);
+    Status apply_partial_row(const PartialRowReader& row);
+    Status commit_write(uint64_t version);
 
 private:
     DISALLOW_COPY_AND_ASSIGN(MemSubTablet);
 
     MemSubTablet();
+    Status prepare_writer_for_column(uint32_t cid);
+    RefPtr<HashIndex> rebuild_hash_index(size_t new_capacity);
 
     mutex _lock;
-    HashIndex _index;
+    RefPtr<HashIndex> _index;
     struct VersionInfo {
     	VersionInfo(uint64_t version, uint64_t size) : version(version), size(size) {}
         uint64_t version=0;
         uint64_t size=0;
     };
     vector<VersionInfo> _versions;
-    unordered_map<uint32_t, RefPtr<Column>> _columns;
+    // cid -> column
+    vector<RefPtr<Column>> _columns;
+
+    // write state
+    const Schema* _schema = nullptr;
+    size_t _row_size = 0;
+    RefPtr<HashIndex> _write_index;
+    // cid -> current writers
+    vector<unique_ptr<ColumnWriter>> _writers;
+    // store temp entries
+    std::vector<HashIndex::Entry> _temp_hash_entries;
 };
 
 

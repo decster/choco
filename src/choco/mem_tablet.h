@@ -3,13 +3,12 @@
 
 #include "common.h"
 #include "mem_sub_tablet.h"
+#include "write_tx.h"
 
 namespace choco {
 
 class ScanSpec;
 class MemTabletScan;
-class MemTabletWriter;
-
 
 class MemTablet : std::enable_shared_from_this<MemTablet> {
 public:
@@ -21,16 +20,18 @@ public:
     const Schema& latest_schema() const;
 
     Status scan(unique_ptr<ScanSpec>& spec, unique_ptr<MemTabletScan>& scan);
-    Status write(unique_ptr<MemTabletWriter>& writer);
+
+    Status create_writetx(unique_ptr<WriteTx>& wtx);
+    Status prepare_writetx(unique_ptr<WriteTx>& wtx);
+    Status commit(unique_ptr<WriteTx>& wtx, uint64_t version);
 
 private:
     friend class MemTabletScan;
-    friend class MemTabletWriter;
     DISALLOW_COPY_AND_ASSIGN(MemTablet);
 
     MemTablet();
 
-    mutex _lock;
+    mutex _vesions_lock;
     struct VersionInfo {
         VersionInfo(uint64_t version, unique_ptr<Schema>& schema) :
             version(version), schema(std::move(schema)) {

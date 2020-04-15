@@ -51,7 +51,7 @@ class TypedColumnReader : public ColumnReader {
 public:
     TypedColumnReader(RefPtr<Column>& column, uint64_t version, uint64_t real_version, vector<ColumnDelta*>& deltas) :
         _column(std::move(column)),
-        _base(_column->_base),
+        _base(&_column->_base),
         _version(version),
         _real_version(real_version),
         _deltas(std::move(deltas)) {
@@ -59,82 +59,36 @@ public:
 
     virtual ~TypedColumnReader() {}
 
-    inline void get_cell(const uint32_t rid, bool& isnull, ST*& pcell) const {
-        // TODO: test perf move delta to template
+    virtual const void * get(const uint32_t rid) const {
         for (ssize_t i=_deltas.size()-1;i>=0;i--) {
             ColumnDelta* pdelta = _deltas[i];
             uint32_t pos = pdelta->find_idx(rid);
             if (pos != DeltaIndex::npos) {
                 if (Nullable) {
-                    isnull = pdelta->nulls() && pdelta->nulls().as<bool>()[pos];
-                    if (!isnull) {
-                        pcell = &(pdelta->data().as<ST>()[pos]);
+                    bool isnull = pdelta->nulls() && pdelta->nulls().as<bool>()[pos];
+                    if (isnull) {
+                        return nullptr;
+                    } else {
+                        return &(pdelta->data().as<ST>()[pos]);
                     }
                 } else {
-                    isnull = false;
-                    pcell = &(pdelta->data().as<ST>()[pos]);
+                    return &(pdelta->data().as<ST>()[pos]);
                 }
-                return;
             }
         }
         uint32_t bid = rid >> 16;
-        DCHECK(bid < _base.size());
+        DCHECK(bid < _base->size());
         uint32_t idx = rid & 0xffff;
-        DCHECK(idx * sizeof(ST) < _base[bid]->data().bsize());
+        DCHECK(idx * sizeof(ST) < (*_base)[bid]->data().bsize());
         if (Nullable) {
-            isnull = _base[bid]->is_null(idx);
-            if (!isnull) {
-                pcell = &(_base[bid]->data().as<ST>()[idx]);
-            }
-        } else {
-            isnull = false;
-            pcell = &(_base[bid]->data().as<ST>()[idx]);
-        }
-    }
-
-    virtual bool get(const uint32_t rid, void * dest) const {
-        bool isnull;
-        ST* pcell;
-        get_cell(rid, isnull, pcell);
-        if (isnull) {
-            return false;
-        } else {
-            if (std::is_same<T, ST>::value) {
-                *(ST*)dest = *pcell;
-            }
-            return true;
-        }
-    }
-
-    virtual uint64_t hashcode(const uint32_t rid) const {
-        bool isnull;
-        ST* pcell;
-        get_cell(rid, isnull, pcell);
-        if (isnull) {
-            return 0;
-        } else {
-            if (std::is_same<T, ST>::value) {
-                return HashCode(*pcell);
+            bool isnull = (*_base)[bid]->is_null(idx);
+            if (isnull) {
+                return nullptr;
             } else {
-                // TODO: support dict
-                return 0;
+                return &((*_base)[bid]->data().as<ST>()[idx]);
             }
-        }
-    }
-
-    virtual bool equals(const uint32_t rid, void * rhs) const {
-        bool isnull;
-        ST* pcell;
-        get_cell(rid, isnull, pcell);
-        if (isnull) {
-            return rhs == nullptr;
         } else {
-            if (std::is_same<T, ST>::value) {
-                return *(ST*)rhs == *pcell;
-            } else {
-                // TODO: support dict
-                return false;
-            }
+            return &((*_base)[bid]->data().as<ST>()[idx]);
         }
     }
 
@@ -150,7 +104,7 @@ private:
     RefPtr<Column> _column;
     uint64_t _version;
     uint64_t _real_version;
-    vector<RefPtr<ColumnPage>>& _base;
+    vector<RefPtr<ColumnPage>>* _base;
     vector<ColumnDelta*> _deltas;
 };
 
@@ -185,6 +139,7 @@ public:
         _column(std::move(column)),
         _base(&_column->_base),
         _update_has_null(false) {
+        _column->capture_latest(_deltas);
     }
 
     virtual ~TypedColumnWriter() {}
@@ -261,10 +216,9 @@ public:
         return Status::OK();
     }
 
-    virtual Status finalize(uint64_t version, RefPtr<Column>& ret) {
+    virtual Status finalize(uint64_t version) {
         if (_updates.size() == 0) {
             // insert(append) only
-            ret.swap(_column);
             return Status::OK();
         }
         // prepare delta
@@ -308,8 +262,92 @@ public:
         }
         _updates.clear();
         RETURN_NOT_OK(add_delta(delta, version));
-        ret.swap(_column);
         return Status::OK();
+    }
+
+    virtual Status get_new_column(RefPtr<Column>& ret) {
+        if (ret != _column) {
+            ret.swap(_column);
+            _column.reset();
+        }
+        return Status::OK();
+    }
+
+    virtual const void * get(const uint32_t rid) const {
+        for (ssize_t i=_deltas.size()-1;i>=0;i--) {
+            ColumnDelta* pdelta = _deltas[i];
+            uint32_t pos = pdelta->find_idx(rid);
+            if (pos != DeltaIndex::npos) {
+                if (Nullable) {
+                    bool isnull = pdelta->nulls() && pdelta->nulls().as<bool>()[pos];
+                    if (isnull) {
+                        return nullptr;
+                    } else {
+                        return &(pdelta->data().as<ST>()[pos]);
+                    }
+                } else {
+                    return &(pdelta->data().as<ST>()[pos]);
+                }
+            }
+        }
+        uint32_t bid = rid >> 16;
+        DCHECK(bid < _base->size());
+        uint32_t idx = rid & 0xffff;
+        DCHECK(idx * sizeof(ST) < (*_base)[bid]->data().bsize());
+        if (Nullable) {
+            bool isnull = (*_base)[bid]->is_null(idx);
+            if (isnull) {
+                return nullptr;
+            } else {
+                return &((*_base)[bid]->data().as<ST>()[idx]);
+            }
+        } else {
+            return &((*_base)[bid]->data().as<ST>()[idx]);
+        }
+    }
+
+    // borrow a virtual function slot to do typed hash
+    virtual uint64_t hashcode(const void * data) const {
+        if (std::is_same<T, ST>::value) {
+            return HashCode(*(const T*)data);
+        } else {
+            // TODO: support SString hash
+            return 0;
+        }
+    }
+
+    virtual bool equals(const uint32_t rid, const void * rhs) const {
+        for (ssize_t i=_deltas.size()-1;i>=0;i--) {
+            ColumnDelta* pdelta = _deltas[i];
+            uint32_t pos = pdelta->find_idx(rid);
+            if (pos != DeltaIndex::npos) {
+                if (Nullable) {
+                    bool isnull = pdelta->nulls() && pdelta->nulls().as<bool>()[pos];
+                    if (isnull) {
+                        return rhs == nullptr;
+                    } else {
+                        return (pdelta->data().as<T>()[pos]) == *(const T*)rhs;
+                    }
+                } else {
+                    return (pdelta->data().as<T>()[pos]) == *(const T*)rhs;
+                }
+            }
+        }
+        uint32_t bid = rid >> 16;
+        DCHECK(bid < _base->size());
+        uint32_t idx = rid & 0xffff;
+        DCHECK(idx * sizeof(ST) < (*_base)[bid]->data().bsize());
+        if (Nullable) {
+            bool isnull = (*_base)[bid]->is_null(idx);
+            if (isnull) {
+                return rhs == nullptr;
+            } else {
+                return ((*_base)[bid]->data().as<T>()[idx]) == *(const T*)rhs;
+            }
+        } else {
+            DCHECK_NOTNULL(rhs);
+            return ((*_base)[bid]->data().as<T>()[idx]) == *(const T*)rhs;
+        }
     }
 
     virtual string to_string() const {
@@ -343,7 +381,6 @@ private:
     }
 
     Status add_page() {
-        //DLOG(INFO) << Format("Column(cid=%u) add ColumnPage %zu/%zu", _column->schema().cid, _base->size(), _base->capacity());
         if (_base->size() == _base->capacity()) {
             RETURN_NOT_OK(expand_base());
         }
@@ -353,6 +390,10 @@ private:
         uint32_t bid = _base->size();
         RETURN_NOT_OK(page->alloc(Column::BLOCK_SIZE, sizeof(ST), BufferTag::base(cid, bid)));
         _base->emplace_back(std::move(page));
+        if (_column->schema().cid == 1) {
+            // only log when first column add page
+            DLOG(INFO) << Format("Column(cid=%u) add ColumnPage %zu/%zu", _column->schema().cid, _base->size(), _base->capacity());
+        }
         return Status::OK();
     }
 
@@ -382,6 +423,7 @@ private:
 
     RefPtr<Column> _column;
     vector<RefPtr<ColumnPage>>* _base;
+    vector<ColumnDelta*> _deltas;
 
     size_t _num_insert = 0;
     size_t _num_update = 0;
@@ -488,6 +530,13 @@ Status Column::capture_version(uint64_t version, vector<ColumnDelta*>& deltas, u
         }
     }
     return Status::OK();
+}
+
+void Column::capture_latest(vector<ColumnDelta*>& deltas) const {
+    deltas.reserve(_versions.size() - _base_idx - 1);
+    for (size_t i=_base_idx+1;i<_versions.size();i++) {
+        deltas.emplace_back(_versions[i].delta.get());
+    }
 }
 
 

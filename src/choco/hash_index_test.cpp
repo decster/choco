@@ -3,7 +3,7 @@
 
 namespace choco {
 
-TEST(hash_index, hash_index) {
+TEST(HashIndex, findset) {
     size_t sz = 20;
     HashIndex hi(sz);
     std::vector<HashIndex::Entry> entries;
@@ -60,4 +60,32 @@ TEST(hash_index, hash_index) {
     hi.dump();
 }
 
+TEST(HashIndex, add) {
+    srand(1);
+    size_t N = 1000;
+    HashIndex hi(N);
+    vector<int64_t> keys(N);
+    for (size_t i = 0; i < N; ++i) {
+        keys[i] = rand();
+        uint64_t hashcode = HashCode(keys[i]);
+        EXPECT_TRUE(hi.add(hashcode, i));
+    }
+    std::vector<HashIndex::Entry> entries;
+    entries.reserve(10);
+    for (size_t i = 0; i < N; ++i) {
+        uint64_t hashcode = HashCode(keys[i]);
+        uint32_t newentry = hi.find(hashcode, entries);
+        bool found = false;
+        for (size_t ei = 0; ei < entries.size(); ++ei) {
+            int64_t v = keys[entries[ei].value];
+            if (v == keys[i]) {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found);
+    }
 }
+
+}
+

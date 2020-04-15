@@ -69,11 +69,12 @@ private:
     template<class, bool, class, class> friend class TypedColumnWriter;
 
     Status capture_version(uint64_t version, vector<ColumnDelta*>& deltas, uint64_t& real_version) const;
+    void capture_latest(vector<ColumnDelta*>& deltas) const;
 
     mutex _lock;
     ColumnSchema _cs;
     Type _storage_type;
-    uint32_t _base_idx;
+    ssize_t _base_idx;
     // TODO: not strictly thread-safe, use a thread-safe append only vector instead
     vector<RefPtr<ColumnPage>> _base;
     struct VersionInfo {
@@ -93,19 +94,12 @@ private:
 class ColumnReader {
 public:
     virtual ~ColumnReader() {}
+
     /**
-     * store value in *dest
-     * return true if cell is not null, false if cell is null
+     * get cell by rid, caller need to make sure rid is in range
+     * otherwise undefined behavior
      */
-    virtual bool get(const uint32_t rid, void * dest) const = 0;
-    /**
-     * return hashcode of the cell
-     */
-    virtual uint64_t hashcode(const uint32_t rid) const = 0;
-    /**
-     * check cell value equals rhs
-     */
-    virtual bool equals(const uint32_t rid, void * rhs) const = 0;
+    virtual const void * get(const uint32_t rid) const = 0;
 
     /**
      * get basic info about this reader
@@ -124,8 +118,15 @@ public:
     virtual ~ColumnWriter() {}
     virtual Status insert(uint32_t rid, const void * value) = 0;
     virtual Status update(uint32_t rid, const void * value) = 0;
-    virtual Status finalize(uint64_t version, RefPtr<Column>& ret) = 0;
+    virtual Status finalize(uint64_t version) = 0;
+    virtual Status get_new_column(RefPtr<Column>& ret) = 0;
     virtual string to_string() const = 0;
+
+    virtual const void * get(const uint32_t rid) const = 0;
+    // get then check equality for fast key lookup
+    virtual bool equals(const uint32_t rid, const void * rhs) const = 0;
+    // borrow a virtual function slot to do typed hash
+    virtual uint64_t hashcode(const void * data) const = 0;
 
 protected:
     ColumnWriter() = default;

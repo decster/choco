@@ -9,7 +9,6 @@ add_library(choco STATIC
   mem_tablet.cpp
   mem_tablet_get.cpp
   mem_tablet_scan.cpp
-  mem_tablet_writer.cpp
   partial_row_batch.cpp
   schema.cpp
   slice.cpp

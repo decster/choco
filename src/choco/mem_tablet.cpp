@@ -1,7 +1,6 @@
 #include "mem_tablet.h"
 #include "mem_tablet_scan.h"
 #include "mem_tablet_get.h"
-#include "mem_tablet_writer.h"
 
 namespace choco {
 
@@ -40,15 +39,27 @@ Status MemTablet::scan(unique_ptr<ScanSpec>& spec, unique_ptr<MemTabletScan>& sc
 	return Status::OK();
 }
 
-Status MemTablet::write(unique_ptr<MemTabletWriter>& writer) {
-	unique_ptr<MemTabletWriter> ret(new MemTabletWriter(
-			shared_from_this(),
-			latest_schema()
-			));
-
-	ret.swap(writer);
-	return Status::OK();
+Status MemTablet::create_writetx(unique_ptr<WriteTx>& wtx) {
+    std::lock_guard<mutex> lg(_vesions_lock);
+    wtx.reset(new WriteTx(latest_schema()));
+    return Status::OK();
 }
 
+Status MemTablet::prepare_writetx(unique_ptr<WriteTx>& wtx) {
+    return Status::OK();
+}
+
+Status MemTablet::commit(unique_ptr<WriteTx>& wtx, uint64_t version) {
+    _sub_tablet->begin_write(latest_schema());
+    for (size_t i = 0; i< wtx->batch_size(); i++) {
+        auto batch = wtx->get_batch(i);
+        PartialRowReader reader(*batch);
+        for (size_t j = 0; j<reader.size(); j++) {
+            RETURN_NOT_OK(reader.read(j));
+            RETURN_NOT_OK(_sub_tablet->apply_partial_row(reader));
+        }
+    }
+    return _sub_tablet->commit_write(version);
+}
 
 } /* namespace choco */

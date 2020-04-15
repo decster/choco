@@ -73,7 +73,6 @@ uint32_t HashIndex::find(uint64_t keyHash, std::vector<Entry> &entries) {
         tag = 1;
     }
     uint64_t pos = (keyHash >> 8) & _chunk_mask;
-    uint64_t step =  tag*2+1; // 1;
     uint64_t orig_pos = pos;
     auto tests = _mm_set1_epi8(static_cast<uint8_t>(tag));
     while (true) {
@@ -89,6 +88,7 @@ uint32_t HashIndex::find(uint64_t keyHash, std::vector<Entry> &entries) {
             if (kHashIndexStats) _nentry++;
         }
         if (chunk.size == HashChunk::CAPACITY) {
+            uint64_t step =  tag*2+1; // 1;
             pos = (pos + step) & _chunk_mask;
             if (pos == orig_pos) {
                 return NOSLOT;
@@ -111,10 +111,38 @@ void HashIndex::set(uint32_t slot, uint64_t keyHash, uint32_t value) {
     chunk.tags[tpos] = tag;
     chunk.values[tpos] = value;
     if (tpos == chunk.size) {
-        _size++;
         chunk.size = tpos + 1;
+        _size++;
     }
 }
+
+bool HashIndex::add(uint64_t keyHash, uint32_t value) {
+    if (kHashIndexStats) _nfind++;
+    uint64_t tag = keyHash & 0xff;
+    if (tag == 0) {
+        tag = 1;
+    }
+    uint64_t pos = (keyHash >> 8) & _chunk_mask;
+    uint64_t orig_pos = pos;
+    while (true) {
+        if (kHashIndexStats) _nprobe++;
+        HashChunk& chunk = _chunks[pos];
+        if (chunk.size == HashChunk::CAPACITY) {
+            uint64_t step =  tag*2+1; // 1;
+            pos = (pos + step) & _chunk_mask;
+            if (pos == orig_pos) {
+                return false;
+            }
+        } else {
+            chunk.tags[chunk.size] = tag;
+            chunk.values[chunk.size] = value;
+            chunk.size++;
+            _size++;
+            return true;
+        }
+    }
+}
+
 
 void HashIndex::clear_stats() {
     _nfind = 0;
