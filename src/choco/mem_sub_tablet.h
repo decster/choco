@@ -15,7 +15,9 @@ public:
 
 	~MemSubTablet();
 
-    size_t latest_size() { return _versions.back().size; }
+    size_t latest_size() const { return _versions.back().size; }
+    Status get_size(uint64_t version, size_t& size) const;
+    Status read_column(uint64_t version, uint32_t cid, unique_ptr<ColumnReader>& reader);
 
     /**
      * caller should make sure schema valid during write
@@ -31,7 +33,7 @@ private:
     Status prepare_writer_for_column(uint32_t cid);
     RefPtr<HashIndex> rebuild_hash_index(size_t new_capacity);
 
-    mutex _lock;
+    mutable mutex _lock;
     RefPtr<HashIndex> _index;
     struct VersionInfo {
     	VersionInfo(uint64_t version, uint64_t size) : version(version), size(size) {}

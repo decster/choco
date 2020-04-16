@@ -31,7 +31,6 @@ uint32_t DeltaIndex::find_idx(uint32_t rid) {
     }
 }
 
-
 //////////////////////////////////////////////////////////////////////////////
 
 size_t ColumnDelta::memory() const {

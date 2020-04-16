@@ -35,7 +35,7 @@ private:
     Buffer   _data;
 };
 
-
+class ColumnBlock;
 class ColumnReader;
 class ColumnWriter;
 template<class, bool, class> class TypedColumnReader;
@@ -100,6 +100,8 @@ public:
      * otherwise undefined behavior
      */
     virtual const void * get(const uint32_t rid) const = 0;
+
+    virtual Status get_block(size_t nrows, size_t block, ColumnBlock& cb) const = 0;
 
     /**
      * get basic info about this reader

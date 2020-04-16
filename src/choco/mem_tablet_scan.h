@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "type.h"
+#include "row_block.h"
 
 namespace choco {
 
@@ -25,7 +26,6 @@ public:
         op1.swap(op1);
     }
 
-private:
     PredicateOp op;
     unique_ptr<Variant> op0;
     unique_ptr<Variant> op1;
@@ -34,10 +34,8 @@ private:
 
 class ColumnScan {
 public:
-    ColumnScan() = default;
-private:
-    string _name;
-    bool _proj = true;
+    string name;
+    bool proj = true;
     // currently only support AND
     vector<unique_ptr<ColumnPredicate>> predicates;
 };
@@ -45,9 +43,15 @@ private:
 
 class ScanSpec {
 public:
+    static Status create(uint64_t version, const string& specstr, unique_ptr<ScanSpec>& spec);
+
     ScanSpec(uint64_t version, uint64_t limit, vector<unique_ptr<ColumnScan>>& cols) : _version(version), _limit(limit) {
         _columns.swap(cols);
     }
+
+    uint64_t version() const { return _version; }
+    uint64_t limit() const { return _limit; }
+    const vector<unique_ptr<ColumnScan>>& columns() const { return _columns; }
 
 private:
     uint64_t _version;
@@ -55,14 +59,35 @@ private:
     vector<unique_ptr<ColumnScan>> _columns;
 };
 
+class MemTablet;
+class ColumnReader;
 
 class MemTabletScan {
 public:
-    MemTabletScan();
+    ~MemTabletScan();
+
+    /**
+     * block content valid until next call to next_block
+     */
+    Status next_block(const RowBlock*& block);
 
 private:
+    DISALLOW_COPY_AND_ASSIGN(MemTabletScan);
+    MemTabletScan() = default;
+
+    friend class MemTablet;
+
+    Status setup();
+
     unique_ptr<ScanSpec> _spec;
-    // hold references
+    shared_ptr<MemTablet> _tablet;
+    const Schema* _schema = nullptr;
+
+    size_t _num_rows = 0;
+    size_t _num_blocks = 0;
+    vector<unique_ptr<ColumnReader>> _readers;
+    unique_ptr<RowBlock> _row_block;
+    size_t _next_block = 0;
 };
 
 

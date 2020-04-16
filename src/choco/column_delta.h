@@ -20,7 +20,23 @@ public:
 
     uint32_t find_idx(uint32_t rid);
 
-    Buffer& index() { return _data; }
+    void block_range(uint32_t bid, uint32_t& start, uint32_t& end) const {
+        if (bid < _block_ends.size()) {
+            start = bid > 0 ? _block_ends[bid-1] : 0;
+            end = _block_ends[bid];
+        }
+        start = 0;
+        end = 0;
+    }
+
+    bool contains_block(uint32_t bid) const {
+        if (bid < _block_ends.size()) {
+            return (bid > 0 ? _block_ends[bid-1] : 0) < _block_ends[bid];
+        }
+        return false;
+    }
+
+    Buffer& data() { return _data; }
 
     vector<uint32_t> _block_ends;
     Buffer _data;
@@ -38,13 +54,25 @@ public:
 
     size_t memory() const;
 
-    Buffer& nulls() { return _nulls; }
+    Buffer& nulls() {
+        return _nulls;
+    }
 
-    Buffer& data() { return _data; }
+    Buffer& data() {
+        return _data;
+    }
 
-    DeltaIndex* index() { return _index.get(); }
+    DeltaIndex* index() {
+        return _index.get();
+    }
 
-    uint32_t find_idx(uint32_t rid) { return _index->find_idx(rid); }
+    bool contains_block(uint32_t bid) const {
+        return _index->contains_block(bid);
+    }
+
+    uint32_t find_idx(uint32_t rid) {
+        return _index->find_idx(rid);
+    }
 
     Status alloc(size_t nblock, size_t size, size_t esize, BufferTag tag, bool has_null);
 

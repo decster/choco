@@ -1,6 +1,7 @@
 #include <type_traits>
 #include <map>
 #include "column.h"
+#include "row_block.h"
 
 namespace choco {
 
@@ -92,8 +93,68 @@ public:
         }
     }
 
+    virtual Status get_block(size_t nrows, size_t block, ColumnBlock& cb) const {
+        bool base_only = true;
+        for (size_t i = 0; i < _deltas.size(); ++i) {
+            if (_deltas[i]->contains_block(block)) {
+                base_only = false;
+                break;
+            }
+        }
+        auto& page = (*_base)[block];
+        if (base_only) {
+            cb.clear();
+            cb.owned = false;
+            cb._data = page->data().data();
+            if (Nullable) {
+                cb._nulls = page->nulls().data();
+            } else {
+                cb._nulls = nullptr;
+            }
+            return Status::OK();
+        }
+        // copy buffer
+        RETURN_NOT_OK(cb.copy_from(nrows, sizeof(ST), page->data(), page->nulls()));
+        for (auto delta : _deltas) {
+            uint32_t start, end;
+            delta->index()->block_range(block, start, end);
+            if (end==start) {
+                continue;
+            }
+            DLOG(INFO) << Format("apply delta with %u entries", end-start);
+            const uint16_t * poses = (const uint16_t*)delta->index()->data().data();
+            const ST * data = delta->data().as<ST>();
+            if (Nullable) {
+                if (delta->nulls()) {
+                    const bool * nulls = delta->nulls().as<bool>();
+                    for (uint32_t i = start; i < end; i++) {
+                        uint16_t pos = poses[i];
+                        bool isnull = nulls[i];
+                        if (isnull) {
+                            ((bool*)cb._nulls)[pos] = true;
+                        } else {
+                            ((bool*)cb._nulls)[pos] = false;
+                            ((ST*)cb._data)[pos] = data[i];
+                        }
+                    }
+                } else {
+                    for (uint32_t i = start; i < end; i++) {
+                        uint16_t pos = poses[i];
+                        ((bool*)cb._nulls)[pos] = false;
+                        ((ST*)cb._data)[pos] = data[i];
+                    }
+                }
+            } else {
+                for (uint32_t i = start; i < end; i++) {
+                    ((ST*)cb._data)[poses[i]] = data[i];
+                }
+            }
+        }
+        return Status::OK();
+    }
+
     virtual string to_string() const {
-        return Format("%s version=%zu rversion=%zu ndelta=%zu",
+        return Format("%s version=%zu(real=%zu) ndelta=%zu",
                 _column->to_string().c_str(),
                 _version,
                 _real_version,

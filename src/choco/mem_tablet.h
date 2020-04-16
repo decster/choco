@@ -10,7 +10,7 @@ namespace choco {
 class ScanSpec;
 class MemTabletScan;
 
-class MemTablet : std::enable_shared_from_this<MemTablet> {
+class MemTablet : public std::enable_shared_from_this<MemTablet> {
 public:
     static Status load(const string& dir, uint64_t last_version, shared_ptr<MemTablet>& tablet);
     static Status create(const string& dir, unique_ptr<Schema>& schema, shared_ptr<MemTablet>& tablet);
@@ -18,10 +18,11 @@ public:
     ~MemTablet();
 
     const Schema& latest_schema() const;
+    const Schema* get_schema(uint64_t version) const;
 
     Status scan(unique_ptr<ScanSpec>& spec, unique_ptr<MemTabletScan>& scan);
 
-    Status create_writetx(unique_ptr<WriteTx>& wtx);
+    Status create_writetx(unique_ptr<WriteTx>& wtx) const;
     Status prepare_writetx(unique_ptr<WriteTx>& wtx);
     Status commit(unique_ptr<WriteTx>& wtx, uint64_t version);
 
@@ -31,7 +32,7 @@ private:
 
     MemTablet();
 
-    mutex _vesions_lock;
+    mutable mutex _vesions_lock;
     struct VersionInfo {
         VersionInfo(uint64_t version, unique_ptr<Schema>& schema) :
             version(version), schema(std::move(schema)) {

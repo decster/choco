@@ -24,6 +24,40 @@ MemSubTablet::MemSubTablet() :
 MemSubTablet::~MemSubTablet() {
 }
 
+Status MemSubTablet::get_size(uint64_t version, size_t& size) const {
+    std::lock_guard<mutex> lg(_lock);
+    if (version == -1) {
+        // get latest
+        size = _versions.back().size;
+        return Status::OK();
+    }
+    if (_versions[0].version > version) {
+        return Status::NotFound("get_size failed, version too old");
+    }
+    for (size_t i=1;i<_versions.size();i++) {
+        if (_versions[i].version > version) {
+            size = _versions[i-1].size;
+            return Status::OK();
+        }
+    }
+    size = _versions.back().size;
+    return Status::OK();
+}
+
+Status MemSubTablet::read_column(uint64_t version, uint32_t cid, unique_ptr<ColumnReader>& reader) {
+    RefPtr<Column> cl;
+    {
+        std::lock_guard<mutex> lg(_lock);
+        if (cid < _columns.size()) {
+            cl = _columns[cid];
+        }
+    }
+    if (!cl) {
+        return Status::NotFound("column not found");
+    }
+    return cl->read(version, reader);
+}
+
 Status MemSubTablet::prepare_writer_for_column(uint32_t cid) {
     if (!_writers[cid]) {
         DLOG(INFO) << "create column writer for: " << cid;

@@ -32,10 +32,13 @@ public:
     void set_zero();
 
     operator bool() const {return _data != nullptr;}
+    const uint8_t* data() const {return _data;}
     uint8_t* data() {return _data;}
     size_t bsize() const {return _bsize;}
 
     template <class T> T* as() { return (T*)_data; }
+
+    template <class T> const T* as() const { return (const T*)_data; }
 
 private:
 
