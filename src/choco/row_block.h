@@ -12,6 +12,7 @@ public:
     ColumnBlock() = default;
     ~ColumnBlock();
     void clear();
+    Status alloc(size_t size, size_t esize);
     Status copy_from(size_t size, size_t esize, Buffer& data, Buffer& nulls);
 
     const uint8_t* data() const {
@@ -28,7 +29,7 @@ private:
     const ColumnSchema* _cs = nullptr;
     uint8_t* _data = nullptr;
     uint8_t* _nulls = nullptr;
-    bool owned = false;
+    size_t _owned_size = 0;
 };
 
 class RowBlock {

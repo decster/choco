@@ -58,9 +58,16 @@ Status MemSubTablet::read_column(uint64_t version, uint32_t cid, unique_ptr<Colu
     return cl->read(version, reader);
 }
 
+Status MemSubTablet::read_index(RefPtr<HashIndex>& index) {
+    // RefPtr should be thread-safe
+    //std::lock_guard<mutex> lg(_lock);
+    index = _index;
+    return Status::OK();
+}
+
+
 Status MemSubTablet::prepare_writer_for_column(uint32_t cid) {
     if (!_writers[cid]) {
-        DLOG(INFO) << "create column writer for: " << cid;
         RETURN_NOT_OK(_columns[cid]->write(_writers[cid]));
     }
     return Status::OK();
@@ -77,6 +84,12 @@ Status MemSubTablet::begin_write(const Schema& schema) {
         prepare_writer_for_column(i+1);
     }
     _temp_hash_entries.reserve(8);
+
+    // setup stats
+    _write_start = Time();
+    _num_insert = 0;
+    _num_update = 0;
+    _num_update_cell = 0;
     return Status::OK();
 }
 
@@ -100,6 +113,7 @@ Status MemSubTablet::apply_partial_row(const PartialRowReader& row) {
     }
     if (rid == -1) {
         // insert
+        _num_insert++;
         rid = _row_size;
         // add all columns
         //DLOG(INFO) << Format("insert rid=%u", rid);
@@ -113,6 +127,9 @@ Status MemSubTablet::apply_partial_row(const PartialRowReader& row) {
         _write_index->set(newslot, hashcode, rid);
         _row_size++;
     } else {
+        // update
+        _num_update++;
+        _num_update_cell += row.cell_size() - 1;
         // add non-key columns
         for (size_t i=1;i<row.cell_size();i++) {
             const void * data;
@@ -159,7 +176,13 @@ Status MemSubTablet::commit_write(uint64_t version) {
         }
         _versions.emplace_back(version, _row_size);
     }
+    _write_index.reset();
     _writers.clear();
+    LOG(INFO) << Format("commit writex(insert=%zu update=%zu update_cell=%zu) %.3lfs",
+            _num_insert,
+            _num_update,
+            _num_update_cell,
+            Time() - _write_start);
     return Status::OK();
 }
 

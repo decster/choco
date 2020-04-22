@@ -24,9 +24,10 @@ public:
         if (bid < _block_ends.size()) {
             start = bid > 0 ? _block_ends[bid-1] : 0;
             end = _block_ends[bid];
+        } else {
+            start = 0;
+            end = 0;
         }
-        start = 0;
-        end = 0;
     }
 
     bool contains_block(uint32_t bid) const {
@@ -53,6 +54,8 @@ public:
     ColumnDelta() = default;
 
     size_t memory() const;
+
+    size_t size() const { return _size; }
 
     Buffer& nulls() {
         return _nulls;

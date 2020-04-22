@@ -103,6 +103,13 @@ public:
 
     virtual Status get_block(size_t nrows, size_t block, ColumnBlock& cb) const = 0;
 
+    virtual Status get_by_rids(const vector<uint32_t>& rid, ColumnBlock& cb) const = 0;
+
+    // only used for not-null key columns
+    virtual bool equals(const uint32_t rid, const void * rhs, size_t rhs_idx) const = 0;
+
+    virtual uint64_t hashcode(const void * rhs, size_t rhs_idx) const = 0;
+
     /**
      * get basic info about this reader
      */

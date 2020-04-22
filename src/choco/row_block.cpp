@@ -2,7 +2,10 @@
 
 namespace choco {
 
-Status ColumnBlock::copy_from(size_t size, size_t esize, Buffer& data, Buffer& nulls) {
+Status ColumnBlock::alloc(size_t size, size_t esize) {
+    if (_owned_size == size) {
+        return Status::OK();
+    }
     clear();
     _data = (uint8_t*)aligned_malloc(size*esize, size*esize>=4096?4096:64);
     if (!_data) {
@@ -14,18 +17,23 @@ Status ColumnBlock::copy_from(size_t size, size_t esize, Buffer& data, Buffer& n
         _data = nullptr;
         return Status::OOM("OOM when allocating column block");
     }
+    _owned_size = size;
+    return Status::OK();
+}
+
+Status ColumnBlock::copy_from(size_t size, size_t esize, Buffer& data, Buffer& nulls) {
+    RETURN_NOT_OK(alloc(size, esize));
     memcpy(_data, data.data(), size*esize);
     if (nulls) {
         memcpy(_nulls, nulls.data(), size);
     } else {
         memset(_nulls, 0, size);
     }
-    owned = true;
     return Status::OK();
 }
 
 void ColumnBlock::clear() {
-    if (owned) {
+    if (_owned_size > 0) {
         if (_data) {
             aligned_free(_data);
             _data = nullptr;
@@ -35,7 +43,7 @@ void ColumnBlock::clear() {
             _nulls = nullptr;
         }
     }
-    owned = false;
+    _owned_size = 0;
 }
 
 ColumnBlock::~ColumnBlock() {

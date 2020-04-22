@@ -47,6 +47,7 @@ public:
 
 private:
     size_t _size;
+    //std::atomic<size_t> _size; // TODO: check performance
     size_t _max_size;
     size_t _num_chunks;
     size_t _chunk_mask;

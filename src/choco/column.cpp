@@ -104,7 +104,6 @@ public:
         auto& page = (*_base)[block];
         if (base_only) {
             cb.clear();
-            cb.owned = false;
             cb._data = page->data().data();
             if (Nullable) {
                 cb._nulls = page->nulls().data();
@@ -121,7 +120,7 @@ public:
             if (end==start) {
                 continue;
             }
-            DLOG(INFO) << Format("apply delta with %u entries", end-start);
+            //DLOG(INFO) << Format("apply delta with %u entries", end-start);
             const uint16_t * poses = (const uint16_t*)delta->index()->data().data();
             const ST * data = delta->data().as<ST>();
             if (Nullable) {
@@ -151,6 +150,61 @@ public:
             }
         }
         return Status::OK();
+    }
+
+    virtual Status get_by_rids(const vector<uint32_t>& rid, ColumnBlock& cb) const {
+        RETURN_NOT_OK(cb.alloc(rid.size(), sizeof(T)));
+        memset(cb._nulls, 0, sizeof(T)*rid.size());
+        for (size_t i=0;i<rid.size();i++) {
+            const T * v = (const T*)get(rid[i]);
+            if (Nullable) {
+                if (v) {
+                    ((T*)cb.data())[i] = *v;
+                } else {
+                    ((bool*)cb._nulls)[i] = true;
+                }
+            } else {
+                ((T*)cb.data())[i] = *v;
+            }
+        }
+        return Status::OK();
+    }
+
+    // borrow a virtual function slot to do typed hash
+    virtual uint64_t hashcode(const void * rhs, size_t rhs_idx) const {
+        if (std::is_same<T, ST>::value) {
+            return HashCode(((const T*)rhs)[rhs_idx]);
+        } else {
+            // TODO: support SString hash
+            return 0;
+        }
+    }
+
+    virtual bool equals(const uint32_t rid, const void * rhs, size_t rhs_idx) const {
+        const T& rhs_value = ((const T*)rhs)[rhs_idx];
+        for (ssize_t i=_deltas.size()-1;i>=0;i--) {
+            ColumnDelta* pdelta = _deltas[i];
+            uint32_t pos = pdelta->find_idx(rid);
+            if (pos != DeltaIndex::npos) {
+                if (Nullable) {
+                    CHECK(false) << "only used for key column";
+                    return false;
+                } else {
+                    return (pdelta->data().as<T>()[pos]) == rhs_value;
+                }
+            }
+        }
+        uint32_t bid = rid >> 16;
+        DCHECK(bid < _base->size());
+        uint32_t idx = rid & 0xffff;
+        DCHECK(idx * sizeof(ST) < (*_base)[bid]->data().bsize());
+        if (Nullable) {
+            CHECK(false) << "only used for key column";
+            return false;
+        } else {
+            DCHECK_NOTNULL(rhs);
+            return ((*_base)[bid]->data().as<T>()[idx]) == rhs_value;
+        }
     }
 
     virtual string to_string() const {
@@ -328,6 +382,7 @@ public:
 
     virtual Status get_new_column(RefPtr<Column>& ret) {
         if (ret != _column) {
+            DLOG(INFO) << Format("%s switch new column", _column->to_string().c_str());
             ret.swap(_column);
             _column.reset();
         }
@@ -474,7 +529,8 @@ private:
         if (_column->_versions.size() == _column->_versions.capacity()) {
             expand_delta();
         }
-        CHECK_LT(_base->size(), _base->capacity());
+        DLOG(INFO) << Format("%s add version %zu update: %zu", _column->to_string().c_str(), version, delta->size());
+        CHECK_LT(_column->_versions.size(), _column->_versions.capacity());
         _column->_versions.emplace_back();
         Column::VersionInfo& vinfo = _column->_versions.back();
         vinfo.version = version;
@@ -590,6 +646,7 @@ Status Column::capture_version(uint64_t version, vector<ColumnDelta*>& deltas, u
             }
         }
     }
+    //DLOG(INFO) << Format("%s capture version %zu ndelta: %zu", to_string().c_str(), version, deltas.size());
     return Status::OK();
 }
 

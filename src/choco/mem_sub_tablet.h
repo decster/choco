@@ -18,6 +18,7 @@ public:
     size_t latest_size() const { return _versions.back().size; }
     Status get_size(uint64_t version, size_t& size) const;
     Status read_column(uint64_t version, uint32_t cid, unique_ptr<ColumnReader>& reader);
+    Status read_index(RefPtr<HashIndex>& index);
 
     /**
      * caller should make sure schema valid during write
@@ -52,6 +53,11 @@ private:
     vector<unique_ptr<ColumnWriter>> _writers;
     // store temp entries
     std::vector<HashIndex::Entry> _temp_hash_entries;
+    // write stats
+    double _write_start = 0;
+    size_t _num_insert = 0;
+    size_t _num_update = 0;
+    size_t _num_update_cell = 0;
 };
 
 

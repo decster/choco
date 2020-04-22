@@ -13,7 +13,7 @@ static const bool kHashIndexStats = true;
 struct alignas(64) HashChunk {
     static const uint32_t CAPACITY = 12;
     uint8_t tags[12];
-    uint32_t size;
+    std::atomic<uint32_t> size;
     uint32_t values[12];
 
     TagVector* tagVector() {
@@ -22,7 +22,7 @@ struct alignas(64) HashChunk {
 
     void dump() {
         printf("[");
-        for (uint32_t i=0;i<std::min(size, (uint32_t)12);i++) {
+        for (uint32_t i=0;i<std::min((uint32_t)size, (uint32_t)12);i++) {
             printf("%6u(%02x)", values[i], (uint32_t)tags[i]);
         }
         printf("]\n");
@@ -78,6 +78,7 @@ uint32_t HashIndex::find(uint64_t keyHash, std::vector<Entry> &entries) {
     while (true) {
         if (kHashIndexStats) _nprobe++;
         HashChunk& chunk = _chunks[pos];
+        uint32_t sz = chunk.size.load(std::memory_order_acquire);
         auto tags = _mm_load_si128(chunk.tagVector());
         auto eqs = _mm_cmpeq_epi8(tags, tests);
         uint32_t mask = _mm_movemask_epi8(eqs) & 0xfff;
@@ -87,14 +88,14 @@ uint32_t HashIndex::find(uint64_t keyHash, std::vector<Entry> &entries) {
             entries.emplace_back((pos << 4) | i, chunk.values[i]);
             if (kHashIndexStats) _nentry++;
         }
-        if (chunk.size == HashChunk::CAPACITY) {
+        if (sz == HashChunk::CAPACITY) {
             uint64_t step =  tag*2+1; // 1;
             pos = (pos + step) & _chunk_mask;
             if (pos == orig_pos) {
                 return NOSLOT;
             }
         } else {
-            return (pos << 4) | chunk.size;
+            return (pos << 4) | sz;
         }
     }
 }
@@ -111,7 +112,7 @@ void HashIndex::set(uint32_t slot, uint64_t keyHash, uint32_t value) {
     chunk.tags[tpos] = tag;
     chunk.values[tpos] = value;
     if (tpos == chunk.size) {
-        chunk.size = tpos + 1;
+        chunk.size.store(tpos+1, std::memory_order_release);
         _size++;
     }
 }
